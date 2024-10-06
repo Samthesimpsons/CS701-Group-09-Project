@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "cs701-group-09"
+version = "0.1.0"
+description = "Project for CS701 Deep Learning and Vision, Medical Image Segmentation"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+torch = "^2.4.1"
+timm = "^1.0.9"
+
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.6.9"
+flake8 = "^7.1.1"
+mypy = "^1.11.2"
+pytest = "^8.3.3"
+pytest-cov = "^5.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
