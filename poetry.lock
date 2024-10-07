@@ -1156,6 +1156,25 @@ testing = ["h5py (>=3.7.0)", "huggingface-hub (>=0.12.1)", "hypothesis (>=6.70.2
 torch = ["safetensors[numpy]", "torch (>=1.10)"]
 
 [[package]]
+name = "segment_anything"
+version = "1.0"
+description = ""
+optional = false
+python-versions = "*"
+files = []
+develop = false
+
+[package.extras]
+all = ["matplotlib", "onnx", "onnxruntime", "opencv-python", "pycocotools"]
+dev = ["black", "flake8", "isort", "mypy"]
+
+[package.source]
+type = "git"
+url = "https://github.com/facebookresearch/segment-anything.git"
+reference = "HEAD"
+resolved_reference = "dca509fe793f601edb92606367a655c15ac00fdf"
+
+[[package]]
 name = "setuptools"
 version = "75.1.0"
 description = "Easily download, build, install, upgrade, and uninstall Python packages"
@@ -1375,4 +1394,4 @@ zstd = ["zstandard (>=0.18.0)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11"
-content-hash = "aca0c994d8b2d158ad78897df6841de9d45105fbcef25a2d158d9d59d73bd5d6"
+content-hash = "5da075cd37e9349a2199ae98dc980e414a9c5284c1b600f5ab42b4b75d97bdf2"
