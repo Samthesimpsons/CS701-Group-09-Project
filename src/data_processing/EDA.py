@@ -1,3 +1,8 @@
+"""
+This module provides a set of functions for processing CT scan data, including segmentation mask visualization, 
+organ counting, voxel spacing analysis, and the generation of Sweetviz reports for exploratory data analysis.
+"""
+
 import os
 import re
 import cv2
