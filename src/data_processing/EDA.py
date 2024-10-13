@@ -1,5 +1,5 @@
 """
-This module provides a set of functions for processing CT scan data, including segmentation mask visualization, 
+This module provides a set of functions for processing CT scan data, including segmentation mask visualization,
 organ counting, voxel spacing analysis, and the generation of Sweetviz reports for exploratory data analysis.
 """
 
@@ -119,9 +119,9 @@ def parse_bounding_box_file(file_path: str) -> pd.DataFrame:
     return pd.DataFrame(organ_count_records)
 
 
-def visualize_segmentation(image_path: str, mask_path: str) -> None:
+def visualize_segmentation_from_image_paths(image_path: str, mask_path: str) -> None:
     """
-    Visualize a CT scan image along with its segmentation mask, and overlay the mask on the image.
+    Visualize a CT scan image along with its segmentation mask, and overlay the mask on the image by loading them from paths.
 
     Args:
         image_path (str): Path to the original CT scan image (e.g., 'data/train_images/01/1.png').
@@ -191,6 +191,105 @@ def visualize_segmentation(image_path: str, mask_path: str) -> None:
 
     plt.subplot(1, 3, 1)
     plt.imshow(image_rgb)
+    plt.title("Original Image")
+    plt.axis("off")
+
+    plt.subplot(1, 3, 2)
+    plt.imshow(mask_rgb)
+    plt.title("Color-Coded Segmentation Mask")
+    plt.axis("off")
+
+    plt.subplot(1, 3, 3)
+    plt.imshow(overlay_image)
+    plt.title("Image with Mask Overlay")
+    plt.axis("off")
+
+    plt.show()
+
+
+def visualize_segmentation_from_numpy_arrays(
+    image_array: np.ndarray, mask_array: np.ndarray
+) -> None:
+    """
+    Visualize a CT scan image along with its segmentation mask, and overlay the mask on the image by loading them as numpy arrays.
+
+    Args:
+        image_array (np.ndarray): The CT scan image as a NumPy array with shape (x, x, 3).
+        mask_array (np.ndarray): The segmentation mask as a NumPy array with shape (x, x).
+
+    Raises:
+        ValueError: If the input arrays do not have the expected shapes.
+    """
+
+    if image_array.ndim != 3 or image_array.shape[2] != 3:
+        raise ValueError("image_array must have shape (x, x, 3)")
+
+    # Ensure the mask is shape (x, x), after flattening if needed
+    if (
+        len(mask_array.shape) == 3
+        and mask_array.shape[0] == mask_array.shape[1]
+        and mask_array.shape[2] == 3
+    ):
+        print(
+            f"Flattening mask array from shape {mask_array.shape} to {(mask_array.shape[0], mask_array.shape[1])}."
+        )
+        mask_array = mask_array[:, :, 0]
+        if mask_array.ndim != 2 or mask_array.shape != image_array.shape[:2]:
+            raise ValueError(
+                "mask_array must have shape (x, x) matching the first two dimensions of image_array"
+            )
+
+    unique_labels = np.unique(mask_array)
+
+    label_mapping = {
+        0: "Background",
+        1: "Gallbladder",
+        2: "Stomach",
+        3: "Esophagus",
+        4: "Right Kidney",
+        5: "Right Adrenal Gland",
+        6: "Left Adrenal Gland",
+        7: "Liver",
+        8: "Left Kidney",
+        9: "Aorta",
+        10: "Spleen",
+        11: "Inferior Vena Cava",
+        12: "Pancreas",
+    }
+
+    label_colors = {
+        0: [0, 0, 0],  # Background (black)
+        1: [255, 255, 0],  # Gallbladder (yellow)
+        2: [255, 0, 0],  # Stomach (red)
+        3: [0, 255, 0],  # Esophagus (green)
+        4: [0, 0, 255],  # Right Kidney (blue)
+        5: [255, 165, 0],  # Right Adrenal Gland (orange)
+        6: [128, 0, 128],  # Left Adrenal Gland (purple)
+        7: [255, 0, 255],  # Liver (magenta)
+        8: [0, 255, 255],  # Left Kidney (cyan)
+        9: [255, 192, 203],  # Aorta (pink)
+        10: [0, 128, 0],  # Spleen (dark green)
+        11: [128, 128, 128],  # Inferior Vena Cava (gray)
+        12: [0, 0, 128],  # Pancreas (dark blue)
+    }
+
+    mask_rgb = np.zeros((mask_array.shape[0], mask_array.shape[1], 3), dtype=np.uint8)
+
+    for label, color in label_colors.items():
+        mask_rgb[mask_array == label] = color
+
+    alpha = 0.5
+    overlay_image = cv2.addWeighted(image_array, 1 - alpha, mask_rgb, alpha, 0)
+
+    print("Unique labels in the segmentation mask and their corresponding organs:")
+    for label in unique_labels:
+        label_name = label_mapping.get(label, "Unknown Label")
+        print(f"Label {label}: {label_name}")
+
+    plt.figure(figsize=(15, 5))
+
+    plt.subplot(1, 3, 1)
+    plt.imshow(image_array)
     plt.title("Original Image")
     plt.axis("off")
 
