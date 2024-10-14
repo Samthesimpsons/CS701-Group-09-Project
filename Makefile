@@ -7,7 +7,6 @@
 .PHONY: lint typing check-all test
 
 lint:
-	poetry run flake8 --ignore=E203,E266,W503,E501 --max-line-length=88 src tests
 	poetry run ruff check src tests --fix
 	poetry run black src tests
 	poetry run black notebooks/
