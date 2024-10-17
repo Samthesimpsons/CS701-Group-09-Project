@@ -1,5 +1,9 @@
 """
-This module provides a set of classes for loading model specific Datasets.
+This module provides a dataset class and utility functions for handling CT scan image segmentation tasks,
+specifically for the Segment Anything Model (SAM).
+
+It includes functionality for loading images, preprocessing them, applying bounding boxes, and preparing
+inputs for SAM during both training and testing phases.
 """
 
 import os
@@ -13,7 +17,7 @@ from .preprocessing import (
     apply_preprocessing_to_label_mask,
     get_bounding_boxes,
 )
-from .EDA import parse_spacing_file
+from .visualization import parse_spacing_file
 
 
 def create_dataloader(
@@ -24,39 +28,40 @@ def create_dataloader(
     batch_size: int = 1,
 ) -> DataLoader:
     """
-    Creates DataLoader object for training.
+    Creates a DataLoader object for a dataset, which is useful for batching inputs.
 
     Args:
-        dataset (torch.utils.data.Dataset): The dataset to split.
-        train_ratio (float): Proportion of the dataset to use for training (default: 0.8).
-        shuffle (bool): Whether to shuffle the dataset before splitting (default: True).
-        num_workers (int): Number of subprocesses to use for data loading (default: 0).
-        batch_size (int): Number of samples per batch to load (default: 1).
+        dataset (torch.utils.data.Dataset): The dataset to load into the DataLoader.
+        train_ratio (float): Proportion of the dataset used for training (default: 0.8).
+        shuffle (bool): Whether to shuffle the data (default: True).
+        num_workers (int): Number of worker processes to load data (default: 0).
+        batch_size (int): Number of samples per batch for inference or training (default: 1).
 
     Returns:
-        DataLoader: DataLoader object for training.
+        DataLoader: A DataLoader object for batching and iterating over a dataset.
     """
-    dataloader = DataLoader(
+    return DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
     )
-    return dataloader
 
 
-class SAMDataset(Dataset):
+class SAMSegmentationDataset(Dataset):
     """
-    A unified dataset class for both training (with masks) and testing (with bounding boxes from a file).
-
-    This dataset can switch between training and testing based on whether a mask directory or a bounding box file is provided.
+    A dataset class for SAM-based segmentation tasks, supporting both training and testing modes.
 
     Args:
-        image_dir (str): Directory containing input images.
-        processor (str): A processor to prepare inputs for the segmentation model.
-        spacing_metadata_dir (str): Directory containing the spacing metadata file.
-        mask_dir (Optional[str]): Directory containing label masks (for training). Default is None.
-        bbox_file_dir (Optional[str]): Directory to the text file containing bounding box annotations (for testing). Default is None.
+        image_dir (str): Directory containing the input images.
+        processor (str): Pretrained SAM processor for preparing model inputs.
+        spacing_metadata_dir (str): Directory containing the spacing metadata for the CT scans.
+        mask_dir (Optional[str]): Directory containing the segmentation masks for training (default: None).
+        bbox_file_dir (Optional[str]): Directory containing bounding boxes for testing (default: None).
+
+    This dataset handles both training (with masks) and testing (with bounding boxes).
+    If `mask_dir` is provided, the dataset operates in training mode. If only `bbox_file_dir` is provided,
+    it operates in testing mode.
     """
 
     def __init__(
@@ -75,44 +80,43 @@ class SAMDataset(Dataset):
 
         if self.mask_dir:
             self.image_files, self.mask_files = self._load_image_mask_paths()
-            self.inputs_with_boxes = self._prepare_inputs_with_bounding_boxes_training()
+            self.inputs_with_boxes = self._prepare_training_inputs()
         elif self.bbox_file_dir:
             self.bbox_data = self._load_bounding_boxes(self.bbox_file_dir)
-            self.inputs_with_boxes = self._prepare_inputs_with_bounding_boxes_testing()
+            self.inputs_with_boxes = self._prepare_testing_inputs()
 
     def _load_image_mask_paths(self) -> Tuple[List[str], List[str]]:
         """
-        Loads all matching image and mask file paths for training.
-        Only called when mask_dir is provided (training).
+        Loads the image and corresponding mask file paths for training mode.
 
         Returns:
-            Tuple[List[str], List[str]]: Lists of matching image and mask file paths.
+            Tuple[List[str], List[str]]: A tuple containing two lists: one for image paths and one for mask paths.
         """
-        image_paths = []
-        mask_paths = []
+        image_paths, mask_paths = [], []
 
-        for ct_folder in sorted(os.listdir(self.image_dir)):
-            ct_image_folder = os.path.join(self.image_dir, ct_folder)
-            ct_mask_folder = os.path.join(self.mask_dir, ct_folder)
+        for patient_folder in sorted(os.listdir(self.image_dir)):
+            image_folder = os.path.join(self.image_dir, patient_folder)
+            mask_folder = os.path.join(self.mask_dir, patient_folder)
 
-            if os.path.isdir(ct_image_folder) and os.path.isdir(ct_mask_folder):
-                images = sorted(os.listdir(ct_image_folder))
-                masks = sorted(os.listdir(ct_mask_folder))
+            if os.path.isdir(image_folder) and os.path.isdir(mask_folder):
+                images = sorted(os.listdir(image_folder))
+                masks = sorted(os.listdir(mask_folder))
 
-                for image_file, mask_file in zip(images, masks):
-                    image_paths.append(os.path.join(ct_image_folder, image_file))
-                    mask_paths.append(os.path.join(ct_mask_folder, mask_file))
+                for img_file, mask_file in zip(images, masks):
+                    image_paths.append(os.path.join(image_folder, img_file))
+                    mask_paths.append(os.path.join(mask_folder, mask_file))
 
         return image_paths, mask_paths
 
-    def _prepare_inputs_with_bounding_boxes_training(
+    def _prepare_training_inputs(
         self,
     ) -> List[Tuple[str, str, Tuple[int, int, int, int]]]:
         """
-        Prepares a list of (image path, mask path, bounding box) for each bounding box in the training dataset.
+        Prepares inputs consisting of images, masks, and bounding boxes for SAM training.
 
         Returns:
-            List[Tuple[str, str, Tuple[int, int, int, int]]]: A list of tuples, each containing the image path, mask path, and a bounding box.
+            List[Tuple[str, str, Tuple[int, int, int, int]]]: A list of tuples containing image paths, mask paths,
+            and bounding boxes.
         """
         inputs_with_boxes = []
 
@@ -120,10 +124,10 @@ class SAMDataset(Dataset):
             image_path = self.image_files[idx]
             mask_path = self.mask_files[idx]
 
-            ct_number, slice_number = self._extract_metadata_from_filename(image_path)
+            ct_id, slice_num = self._extract_metadata_from_filename(image_path)
 
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-            bounding_boxes = get_bounding_boxes(mask, ct_number, slice_number)
+            bounding_boxes = get_bounding_boxes(mask, ct_id, slice_num)
 
             for box in bounding_boxes.values():
                 inputs_with_boxes.append((image_path, mask_path, box))
@@ -134,39 +138,37 @@ class SAMDataset(Dataset):
         self, bbox_file_dir: str
     ) -> Dict[Tuple[str, int, int], List[int]]:
         """
-        Loads the bounding box annotations from the text file for testing.
+        Loads bounding boxes from a file for testing mode.
 
         Args:
-            bbox_file_dir (str): Directory to the text file containing bounding box annotations.
+            bbox_file_dir (str): Path to the file containing bounding box coordinates.
 
         Returns:
-            Dict[Tuple[str, int, int], List[int]]: A dictionary with keys as
-            (CT number, slice number, organ label) and values as bounding box coordinates.
+            Dict[Tuple[str, int, int], List[int]]: A dictionary where keys are tuples of CT ID, slice number, and organ label,
+            and values are bounding box coordinates.
         """
         bbox_data = {}
 
         with open(bbox_file_dir, "r") as file:
             for line in file:
                 key, value = line.strip().split(": ")
-                ct_number, slice_number, organ_label = key.strip("<>").split(", ")
+                ct_id, slice_num, organ_label = key.strip("<>").split(", ")
                 bbox = eval(value)
-                bbox_data[(str(ct_number), slice_number, organ_label)] = bbox
+                bbox_data[(str(ct_id), slice_num, organ_label)] = bbox
 
         return bbox_data
 
-    def _prepare_inputs_with_bounding_boxes_testing(
-        self,
-    ) -> List[Tuple[str, List[int]]]:
+    def _prepare_testing_inputs(self) -> List[Tuple[str, List[int]]]:
         """
-        Prepares a list of (image path, bounding box) for each bounding box in the testing dataset.
+        Prepares inputs consisting of images and bounding boxes for SAM testing.
 
         Returns:
-            List[Tuple[str, List[int]]]: A list of tuples, each containing the image path and a bounding box.
+            List[Tuple[str, List[int]]]: A list of tuples containing image paths and bounding boxes.
         """
         inputs_with_boxes = []
 
-        for (ct_number, slice_number, _), bbox in self.bbox_data.items():
-            image_path = os.path.join(self.image_dir, ct_number, f"{slice_number}.png")
+        for (ct_id, slice_num, _), bbox in self.bbox_data.items():
+            image_path = os.path.join(self.image_dir, ct_id, f"{slice_num}.png")
 
             if os.path.exists(image_path):
                 inputs_with_boxes.append((image_path, bbox))
@@ -177,84 +179,88 @@ class SAMDataset(Dataset):
 
     def __len__(self) -> int:
         """
-        Returns the total number of inputs (bounding boxes) in the dataset.
+        Returns the total number of inputs based on bounding boxes.
 
         Returns:
-            int: The total number of bounding box-based inputs in the dataset.
+            int: The total number of input samples (bounding box-based).
         """
         return len(self.inputs_with_boxes)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """
-        Retrieves an image and a bounding box, applies preprocessing,
-        and prepares the input for the segmentation model.
+        Retrieves the input at the specified index.
 
         Args:
             idx (int): Index of the input to retrieve.
 
         Returns:
-            Dict[str, Any]: A dictionary containing processed input tensors.
+            Dict[str, Any]: The processed input data ready for SAM, which includes pixel values, bounding boxes,
+            and either the ground truth mask (for training) or image path (for testing).
         """
-        if self.mask_dir:  # For training set
+        if self.mask_dir:  # Training mode
             image_path, mask_path, bounding_box = self.inputs_with_boxes[idx]
 
             image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
 
-            ct_number, slice_number = self._extract_metadata_from_filename(image_path)
+            ct_id, slice_num = self._extract_metadata_from_filename(image_path)
 
             spacing = tuple(
-                self.spacing_metadata_df[
-                    self.spacing_metadata_df["CT_ID"] == ct_number
-                ][["spacing_X", "spacing_Y"]].iloc[0]
+                self.spacing_metadata_df[self.spacing_metadata_df["CT_ID"] == ct_id][
+                    ["spacing_X", "spacing_Y"]
+                ].iloc[0]
             )
 
-            # Apply our custom preprocessing
-            new_image = apply_preprocessing_to_input_image(image, spacing)
-            new_mask = apply_preprocessing_to_label_mask(mask, spacing)
+            processed_image = apply_preprocessing_to_input_image(
+                image,
+                # spacing,
+            )
+            processed_mask = apply_preprocessing_to_label_mask(
+                mask,
+                # spacing,
+            )
 
             inputs = self.processor(
-                cv2.cvtColor(new_image, cv2.COLOR_GRAY2RGB),
+                cv2.cvtColor(processed_image, cv2.COLOR_GRAY2RGB),
                 input_boxes=[[bounding_box]],  # A single bounding box
                 return_tensors="pt",
             )
 
-            # Remove the batch dimension added by the processor (default behavior)
             inputs = {k: v.squeeze(0) for k, v in inputs.items()}
-
-            inputs["ground_truth_mask"] = torch.tensor(new_mask, dtype=torch.float32)
+            inputs["ground_truth_mask"] = torch.tensor(
+                processed_mask, dtype=torch.float32
+            )
 
             return inputs
 
-        else:  # For testing
+        else:  # Testing mode
             image_path, bounding_box = self.inputs_with_boxes[idx]
 
             image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
 
-            # TODO: If we apply preprocessing, then we need to remap it back to inital volume
             inputs = self.processor(
                 cv2.cvtColor(image, cv2.COLOR_GRAY2RGB),
                 input_boxes=[[bounding_box]],  # A single bounding box
                 return_tensors="pt",
             )
 
-            # Remove the batch dimension added by the processor (default behavior)
             inputs = {k: v.squeeze(0) for k, v in inputs.items()}
+            inputs["image_path"] = image_path
 
             return inputs
 
     def _extract_metadata_from_filename(self, filename: str) -> Tuple[str, int]:
         """
-        Extracts the CT number and slice number from the filename.
+        Extracts the CT ID and slice number from the given file path.
 
         Args:
-            filename (str): Full path to the image file.
+            filename (str): The path to the image file.
 
         Returns:
-            Tuple[str, int]: A tuple containing the CT number and the slice number.
+            Tuple[str, int]: The CT ID and the slice number extracted from the filename.
         """
         parts = filename.split(os.sep)
-        ct_number = parts[-2]
-        slice_number = int(parts[-1].split(".png")[0])
+        ct_id = parts[-2]
+        slice_num = int(parts[-1].split(".png")[0])
 
-        return ct_number, slice_number
+        return ct_id, slice_num
