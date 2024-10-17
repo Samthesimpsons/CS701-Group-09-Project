@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 plt.ion()
 
 
-class SAMModel:
+class SAMTrainer:
     """A class to encapsulate the SAM model, optimizer, and training logic."""
 
     def __init__(
