@@ -1,5 +1,6 @@
 """
-This module provides a set of functions for pre-processing CT images.
+This module provides a set of general functions for preprocessing CT images, 
+including resampling, cropping, contrast/brightness adjustment, and bounding box extraction.
 """
 
 import cv2
@@ -52,6 +53,9 @@ def center_crop_or_pad(
     image: np.ndarray, target_size: int = 512, background_value: int = 0
 ) -> np.ndarray:
     """Center crop or pad the grayscale image to the target size.
+
+    If the input image is smaller than the target size, it is padded with the background value.
+    If the image is larger, it is cropped to fit the target size.
 
     Args:
         image (np.ndarray): Input image as a 2D (grayscale) array.
@@ -106,30 +110,35 @@ def apply_preprocessing_to_input_image(
     image: np.ndarray,
     original_spacing: Tuple[float, float],
     new_spacing: Tuple[float, float] = (0.9, 0.9),
-    alpha: float = 1.5,
-    beta: int = 20,
+    alpha: float = 1.1,
+    beta: int = 5,
     target_size: int = 512,
     background_value: int = 0,
 ) -> np.ndarray:
-    """Apply resampling, contrast/brightness adjustment, and center crop or padding.
+    """Apply preprocessing steps such as resampling, contrast/brightness adjustment, and center crop or padding.
+
+    This function is useful for preparing a CT image for further analysis or segmentation tasks.
 
     Args:
         image (np.ndarray): Input grayscale image to preprocess.
-        original_spacing (Tuple[float, float]): Original pixel spacing.
+        original_spacing (Tuple[float, float]): Original pixel spacing of the image.
         new_spacing (Tuple[float, float]): New pixel spacing for resampling.
-        alpha (float): Contrast factor (> 1 increases contrast).
-        beta (int): Brightness factor (positive increases brightness).
-        target_size (int): Target size for height and width after cropping or padding.
-        background_value (int): Value used for padding if the image is smaller.
+        alpha (float): Contrast adjustment factor.
+        beta (int): Brightness adjustment factor.
+        target_size (int): Target size for both height and width after cropping or padding.
+        background_value (int): Background value for padding.
 
     Returns:
-        np.ndarray: Preprocessed image.
+        np.ndarray: Preprocessed image ready for model input or further analysis.
     """
-    resampled_image = resample_pixel_space(image, original_spacing, new_spacing)
+    # Step 1: Resample the image to new pixel spacing (commented out for this use case)
+    # resampled_image = resample_pixel_space(image, original_spacing, new_spacing)
 
-    adjusted_image = adjust_contrast_brightness(resampled_image, alpha, beta)
+    # Step 2: Crop or pad the resampled image to the target size (commented out)
+    # cropped_image = center_crop_or_pad(resampled_image, target_size, background_value)
 
-    final_image = center_crop_or_pad(adjusted_image, target_size, background_value)
+    # Step 3: Adjust contrast and brightness
+    final_image = adjust_contrast_brightness(image, alpha, beta)
 
     return final_image
 
@@ -141,21 +150,29 @@ def apply_preprocessing_to_label_mask(
     target_size: int = 512,
     background_value: int = 0,
 ) -> np.ndarray:
-    """Apply resampling and center crop or padding to label image mask.
+    """Apply preprocessing steps to a label mask, including resampling and binary conversion.
+
+    The label mask is preprocessed similarly to the input image, with optional resampling
+    and resizing, followed by conversion of the label to binary format.
 
     Args:
-        labels (np.ndarray): Input label image to preprocess.
-        original_spacing (Tuple[float, float]): Original pixel spacing.
+        labels (np.ndarray): Input label mask as a NumPy array.
+        original_spacing (Tuple[float, float]): Original pixel spacing of the label mask.
         new_spacing (Tuple[float, float]): New pixel spacing for resampling.
-        target_size (int): Target size for height and width after cropping or padding.
-        background_value (int): Value used for padding if the label image is smaller.
+        target_size (int): Target size for both height and width after cropping or padding.
+        background_value (int): Background value for padding.
 
     Returns:
-        np.ndarray: Preprocessed label image.
+        np.ndarray: Preprocessed label mask as a binary NumPy array.
     """
-    resampled_label = resample_pixel_space(labels, original_spacing, new_spacing)
+    # Step 1: Resample the label mask (commented out for this use case)
+    # resampled_label = resample_pixel_space(labels, original_spacing, new_spacing)
 
-    final_label = center_crop_or_pad(resampled_label, target_size, background_value)
+    # Step 2: Crop or pad the resampled label to the target size (commented out)
+    # cropped_label = center_crop_or_pad(resampled_label, target_size, background_value)
+
+    # Step 3: Convert the label mask to binary (1 for object, 0 for background)
+    final_label = np.where(labels > 0, 1, 0)
 
     return final_label
 
@@ -165,25 +182,23 @@ def get_bounding_boxes(
 ) -> Dict[Tuple[int, int, int], List[int]]:
     """
     Computes bounding boxes for each unique label in a given ground truth mask.
-    Adds a random perturbation to the bounding box coordinates.
+    The bounding boxes include a random perturbation to the coordinates.
 
     Args:
-        mask_array (np.ndarray): A 2D numpy array representing the ground truth mask.
-            Non-zero values indicate the presence of objects, and each unique value corresponds
-            to a different object or class.
-        CT_number (str): The CT number for the scan (e.g., '01', '02').
-        scan_number (int): The scan number.
+        mask_array (np.ndarray): 2D numpy array representing the ground truth mask.
+                                 Non-zero values indicate the presence of objects.
+        CT_number (str): The CT scan identifier (e.g., '01', '02').
+        scan_number (int): The slice number of the scan.
 
     Returns:
-        Dict[Tuple[int, int, int], List[int]]: A dictionary where the keys are tuples of
-            (CT_number, scan_number, label), and the values are the bounding box coordinates
-            in the format [x_min, y_min, x_max, y_max].
+        Dict[Tuple[int, int, int], List[int]]: A dictionary where keys are tuples of
+                                               (CT_number, scan_number, label), and
+                                               values are bounding box coordinates [x_min, y_min, x_max, y_max].
     """
     if mask_array.ndim != 2:
         raise ValueError("mask_array must be a 2D array.")
 
     H, W = mask_array.shape
-
     bounding_boxes = {}
 
     valid_labels = set(range(1, 13))
@@ -203,6 +218,7 @@ def get_bounding_boxes(
         x_min, x_max = np.min(x_indices), np.max(x_indices)
         y_min, y_max = np.min(y_indices), np.max(y_indices)
 
+        # Apply random perturbation to bounding box coordinates
         x_min = max(0, x_min - np.random.randint(0, 20))
         x_max = min(W, x_max + np.random.randint(0, 20))
         y_min = max(0, y_min - np.random.randint(0, 20))
