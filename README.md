@@ -89,13 +89,9 @@ data/
 
 ### 3.1. Folder Structure
 The current folder structure follows a pattern similar to **Kedro**:
-- **`./conf/base`**: Contains all the YAML configurations.  
-- **`./conf/local`**: Empty as no secret credentials (e.g., S3 keys) are being used.
 - **`./data`**: Contains all saved data (raw, processed).
 - **`./notebooks`**: Contains any Jupyter notebooks.
 - **`./src`**: Contains all the scripts.
-- **`./tests`**: For pytest integration, mirrored to the `./src` folder.
-- **`./results`**: For saving any intermediate results for submissions, etc.
 - **`./models`**: Hosts any trained or pretrained models.
 
 ### 3.2. Dependency Management
