@@ -167,3 +167,12 @@ cython_debug/
 
 # Data
 *.png
+
+*.DS_Store
+*.txt
+
+# nnUNet
+nnunet/nnUNet
+nnUNet_preprocessed
+nnUNet_raw
+nnUNet_results
