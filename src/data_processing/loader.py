@@ -211,8 +211,14 @@ class SAMSegmentationDataset(Dataset):
                 ].iloc[0]
             )
 
-            processed_image = apply_preprocessing_to_input_image(image, spacing)
-            processed_mask = apply_preprocessing_to_label_mask(mask, spacing)
+            processed_image = apply_preprocessing_to_input_image(
+                image,
+                # spacing,
+            )
+            processed_mask = apply_preprocessing_to_label_mask(
+                mask,
+                # spacing,
+            )
 
             inputs = self.processor(
                 cv2.cvtColor(processed_image, cv2.COLOR_GRAY2RGB),

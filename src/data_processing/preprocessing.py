@@ -108,8 +108,8 @@ def adjust_contrast_brightness(
 
 def apply_preprocessing_to_input_image(
     image: np.ndarray,
-    original_spacing: Tuple[float, float],
-    new_spacing: Tuple[float, float] = (0.9, 0.9),
+    # original_spacing: Tuple[float, float],
+    # new_spacing: Tuple[float, float] = (0.9, 0.9),
     alpha: float = 1.1,
     beta: int = 5,
     target_size: int = 512,
@@ -145,8 +145,8 @@ def apply_preprocessing_to_input_image(
 
 def apply_preprocessing_to_label_mask(
     labels: np.ndarray,
-    original_spacing: Tuple[float, float] = (1.0, 1.0),
-    new_spacing: Tuple[float, float] = (0.9, 0.9),
+    # original_spacing: Tuple[float, float] = (1.0, 1.0),
+    # new_spacing: Tuple[float, float] = (0.9, 0.9),
     target_size: int = 512,
     background_value: int = 0,
 ) -> np.ndarray:

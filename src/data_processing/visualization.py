@@ -124,6 +124,7 @@ def visualize_segmentation_from_numpy_arrays(
     image_array: np.ndarray,
     mask_array: np.ndarray,
     bounding_boxes: Optional[List[List[int]]] = None,
+    ignore_print_labels: Optional[bool] = False,
 ) -> None:
     """
     Visualizes a CT scan image with its segmentation mask and optional bounding boxes.
@@ -195,10 +196,11 @@ def visualize_segmentation_from_numpy_arrays(
                 thickness=2,
             )
 
-    print("Labels in segmentation mask and corresponding organs:")
-    for label in unique_labels:
-        label_name = label_mapping.get(label, "Unknown Label")
-        print(f"Label {label}: {label_name}")
+    if not ignore_print_labels:
+        print("Labels in segmentation mask and corresponding organs:")
+        for label in unique_labels:
+            label_name = label_mapping.get(label, "Unknown Label")
+            print(f"Label {label}: {label_name}")
 
     plt.figure(figsize=(15, 5))
 
