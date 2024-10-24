@@ -138,7 +138,6 @@ def apply_preprocessing_to_input_image(
     return image
 
 
-
 def apply_preprocessing_to_label_mask(
     labels: np.ndarray,
     # original_spacing: Tuple[float, float] = (1.0, 1.0),
@@ -172,7 +171,6 @@ def get_bounding_boxes(
 ) -> Dict[Tuple[int, int, int], List[int]]:
     """
     Computes bounding boxes for each unique label in a given ground truth mask.
-    The bounding boxes include a random perturbation to the coordinates.
 
     Args:
         mask_array (np.ndarray): 2D numpy array representing the ground truth mask.
@@ -207,12 +205,6 @@ def get_bounding_boxes(
 
         x_min, x_max = np.min(x_indices), np.max(x_indices)
         y_min, y_max = np.min(y_indices), np.max(y_indices)
-
-        # Apply random perturbation to bounding box coordinates
-        x_min = max(0, x_min - np.random.randint(0, 20))
-        x_max = min(W, x_max + np.random.randint(0, 20))
-        y_min = max(0, y_min - np.random.randint(0, 20))
-        y_max = min(H, y_max + np.random.randint(0, 20))
 
         bounding_boxes[f"<{CT_number}, {scan_number}, {label}>"] = [
             x_min,

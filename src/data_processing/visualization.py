@@ -128,7 +128,21 @@ def visualize_segmentation_from_numpy_arrays(
 ) -> None:
     """
     Visualizes a CT scan image with its segmentation mask and optional bounding boxes.
-
+    | Label | Organ                  | Color            |
+    |-------|------------------------|------------------|
+    | 0     | Background             | Black            |
+    | 1     | Gallbladder            | Yellow           |
+    | 2     | Stomach                | Red              |
+    | 3     | Esophagus              | Green            |
+    | 4     | Right Kidney           | Blue             |
+    | 5     | Right Adrenal Gland    | Orange           |
+    | 6     | Left Adrenal Gland     | Purple           |
+    | 7     | Liver                  | Magenta          |
+    | 8     | Left Kidney            | Cyan             |
+    | 9     | Aorta                  | Pink             |
+    | 10    | Spleen                 | Dark Green       |
+    | 11    | Inferior Vena Cava     | Gray             |
+    | 12    | Pancreas               | Dark Blue        |
     Args:
         image_array (np.ndarray): CT scan image in 2D format.
         mask_array (np.ndarray): Segmentation mask in 2D format.
@@ -211,7 +225,7 @@ def visualize_segmentation_from_numpy_arrays(
 
         plt.subplot(1, 2, 2)
         plt.imshow(overlay_image)
-        plt.title("Image with Mask Label and Bounding Boxes")
+        plt.title("Image with Mask Label")
         plt.axis("off")
 
         plt.show()
@@ -226,7 +240,7 @@ def visualize_segmentation_from_numpy_arrays(
 
         plt.subplot(1, 2, 2)
         plt.imshow(overlay_image)
-        plt.title("Inference Segmentation Mask and Bounding Boxes")
+        plt.title("Inference Segmentation Mask")
         plt.axis("off")
 
         plt.show()
