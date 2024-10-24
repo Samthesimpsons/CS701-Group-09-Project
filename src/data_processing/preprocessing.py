@@ -206,6 +206,11 @@ def get_bounding_boxes(
         x_min, x_max = np.min(x_indices), np.max(x_indices)
         y_min, y_max = np.min(y_indices), np.max(y_indices)
 
+        x_min = max(0, x_min - np.random.randint(0, 10))
+        x_max = min(W, x_max + np.random.randint(0, 10))
+        y_min = max(0, y_min - np.random.randint(0, 10))
+        y_max = min(H, y_max + np.random.randint(0, 10))
+
         bounding_boxes[f"<{CT_number}, {scan_number}, {label}>"] = [
             x_min,
             y_min,
