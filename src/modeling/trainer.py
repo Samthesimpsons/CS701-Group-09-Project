@@ -16,7 +16,7 @@ import torch
 import torch.nn.functional as F
 from monai.losses import DiceCELoss
 from sklearn.model_selection import KFold
-from torch.optim import Adam
+from torch.optim import AdamW
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 from transformers import SamModel
@@ -66,12 +66,11 @@ class SAMTrainer:
         self,
         model_name: str = "facebook/sam-vit-base",
         device: str = "cpu",
-        learning_rate: float = 1e-5,
-        weight_decay: float = 0,
-        lora_r: int = 8,
-        lora_alpha: int = 16,
-        lora_dropout: float = 0.1,
-        quantize_8bits: bool = False,
+        learning_rate: float = 0.005,
+        lora_r: int = 4,
+        lora_alpha: int = 8,
+        lora_dropout: float = 0,
+        quantize_4bits: bool = False,
     ):
         """Initialize the SAMTrainer class with model, optimizer, and loss function.
 
@@ -79,21 +78,25 @@ class SAMTrainer:
             model_name (str): The name of the model to load from Hugging Face.
             device (str): The device to use for training ('cpu' or 'cuda').
             learning_rate (float): The learning rate for the optimizer.
-            weight_decay (float): The weight decay for the optimizer.
             lora_r (int): Rank of the LoRA decomposition.
             lora_alpha (int): Scaling factor for the LoRA parameters.
             lora_dropout (float): Dropout rate for the LoRA layers.
-            quantize_8bits (bool): Whether to load the model in 8-bit quantization.
+            quantize_4bits (bool): Whether to load the model in 4-bit quantization.
         """
         self.device = device
         self.lora_r = lora_r
         self.lora_alpha = lora_alpha
         self.lora_dropout = lora_dropout
-        self.quantize_8bits = quantize_8bits
+        self.quantize_4bits = quantize_4bits
         self.model = self._initialize_model(model_name)
-        self.optimizer = self._get_optimizer(learning_rate, weight_decay)
+        self.optimizer = self._get_optimizer(learning_rate)
         self.loss_function = DiceCELoss(
-            sigmoid=True, softmax=False, squared_pred=True, reduction="mean"
+            sigmoid=True,
+            softmax=False,
+            squared_pred=True,
+            reduction="mean",
+            lambda_ce=0.2,
+            lambda_dice=0.8,
         )
 
     def _initialize_model(self, model_name: str) -> SamModel:
@@ -108,34 +111,48 @@ class SAMTrainer:
         config = LoraConfig(
             r=self.lora_r,
             lora_alpha=self.lora_alpha,
-            target_modules=["q_proj", "k_proj", "v_proj", "out_proj"],
+            target_modules=["qkv"],
             lora_dropout=self.lora_dropout,
             bias="none",
         )
-        if self.quantize_8bits:
-            model = get_peft_model(
-                SamModel.from_pretrained(model_name, load_in_8bit=True), config
-            )
+
+        if self.quantize_4bits:
+            model = SamModel.from_pretrained(model_name, load_in_4bit=True)
         else:
-            model = get_peft_model(SamModel.from_pretrained(model_name), config)
-        model.print_trainable_parameters()
+            model = SamModel.from_pretrained(model_name)
+
+        for name, param in model.named_parameters():
+            if name.startswith("vision_encoder"):
+                param.requires_grad_(False)
+
+        model.vision_encoder = get_peft_model(model.vision_encoder, config)
+
+        percentage_of_trainable_parameters = (
+            sum(p.numel() for p in model.parameters() if p.requires_grad)
+            / sum(p.numel() for p in model.parameters())
+            * 100
+        )
+        print(
+            f"Percentage of trainable parameters: {percentage_of_trainable_parameters:.2f}%"
+        )
+
         model.to(self.device)
         return model
 
-    def _get_optimizer(self, learning_rate: float, weight_decay: float) -> Adam:
-        """Configure the optimizer.
+    def _get_optimizer(self, learning_rate: float) -> AdamW:
+        """Configure the optimizer with AdamW.
 
         Args:
             learning_rate (float): The learning rate for the optimizer.
-            weight_decay (float): The weight decay for regularization.
 
         Returns:
-            Adam: The configured optimizer.
+            AdamW: The configured optimizer with specific betas and weight decay.
         """
-        return Adam(
+        return AdamW(
             self.model.mask_decoder.parameters(),
             lr=learning_rate,
-            weight_decay=weight_decay,
+            betas=(0.9, 0.999),
+            weight_decay=0.1,
         )
 
     def _compute_loss(
@@ -172,7 +189,9 @@ class SAMTrainer:
             )
             predicted_masks = outputs.pred_masks.squeeze(1)
             predicted_masks = F.interpolate(
-                predicted_masks, size=(512, 512), mode="nearest-exact",
+                predicted_masks,
+                size=(512, 512),
+                mode="nearest-exact",
             )
 
             ground_truth_masks = batch["ground_truth_mask"].float().to(self.device)

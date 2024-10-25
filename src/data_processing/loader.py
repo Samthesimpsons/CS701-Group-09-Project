@@ -12,6 +12,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from typing import Tuple, Dict, List, Any, Optional
 from transformers import SamProcessor
+from collections import defaultdict
 from .preprocessing import (
     apply_preprocessing_to_input_image,
     apply_preprocessing_to_label_mask,
@@ -108,13 +109,15 @@ class SAMSegmentationDataset(Dataset):
 
     def _prepare_training_inputs(
         self,
-    ) -> List[Tuple[str, str, Tuple[int, int, int, int]]]:
+    ) -> List[Tuple[str, str, List[List[int]]]]:
         """
-        Prepares inputs consisting of images, masks, and bounding boxes for SAM training.
+        Prepares inputs consisting of images, masks, and lists of bounding boxes for SAM training.
 
         Returns:
-            List[Tuple[str, str, Tuple[int, int, int, int]]]: A list of tuples containing image paths, mask paths,
-            and bounding boxes.
+            List[Tuple[str, str, List[List[int]]]]: A list of tuples where each tuple contains:
+                - image path (str)
+                - mask path (str)
+                - a list of bounding boxes, each represented as a list of four integers [x_min, y_min, x_max, y_max].
         """
         inputs_with_boxes = []
 
@@ -125,10 +128,14 @@ class SAMSegmentationDataset(Dataset):
             ct_id, slice_num = self._extract_metadata_from_filename(image_path)
 
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+
             bounding_boxes = get_bounding_boxes(mask, ct_id, slice_num)
 
-            for box in bounding_boxes.values():
-                inputs_with_boxes.append((image_path, mask_path, box))
+            list_of_bounding_boxes = [
+                bounding_box for _, bounding_box in bounding_boxes.items()
+            ]
+
+            inputs_with_boxes.append((image_path, mask_path, list_of_bounding_boxes))
 
         return inputs_with_boxes
 
@@ -156,22 +163,31 @@ class SAMSegmentationDataset(Dataset):
 
         return bbox_data
 
-    def _prepare_testing_inputs(self) -> List[Tuple[str, List[int]]]:
+    def _prepare_testing_inputs(self) -> List[Tuple[str, List[List[int]]]]:
         """
-        Prepares inputs consisting of images and bounding boxes for SAM testing.
+        Prepares inputs consisting of images and lists of bounding boxes for SAM testing.
+        Groups bounding boxes by image if the same ct_id and slice_num appear multiple times.
 
         Returns:
-            List[Tuple[str, List[int]]]: A list of tuples containing image paths and bounding boxes.
+            List[Tuple[str, List[List[int]]]]: A list of tuples where each tuple contains:
+                - image path (str)
+                - a list of lists of bounding boxes, with each bounding box represented as a list of integers [x_min, y_min, x_max, y_max].
         """
-        inputs_with_boxes = []
+        inputs_with_boxes = defaultdict(list)
 
         for (ct_id, slice_num, _), bbox in self.bbox_data.items():
             image_path = os.path.join(self.image_dir, ct_id, f"{slice_num}.png")
 
             if os.path.exists(image_path):
-                inputs_with_boxes.append((image_path, bbox))
+                inputs_with_boxes[(ct_id, slice_num)].append(bbox)
             else:
                 print(f"Warning: Image {image_path} not found, skipping.")
+
+        # Reformat similar to training_inputs
+        inputs_with_boxes = [
+            (os.path.join(self.image_dir, ct_id, f"{slice_num}.png"), bboxes)
+            for (ct_id, slice_num), bboxes in inputs_with_boxes.items()
+        ]
 
         return inputs_with_boxes
 
@@ -196,7 +212,7 @@ class SAMSegmentationDataset(Dataset):
             and either the ground truth mask (for training) or image path (for testing).
         """
         if self.mask_dir:  # Training mode
-            image_path, mask_path, bounding_box = self.inputs_with_boxes[idx]
+            image_path, mask_path, bounding_boxes = self.inputs_with_boxes[idx]
 
             image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
@@ -220,7 +236,7 @@ class SAMSegmentationDataset(Dataset):
 
             inputs = self.processor(
                 cv2.cvtColor(processed_image, cv2.COLOR_GRAY2RGB),
-                input_boxes=[[bounding_box]],  # A single bounding box
+                input_boxes=[[bounding_boxes]],
                 return_tensors="pt",
             )
 
@@ -232,17 +248,16 @@ class SAMSegmentationDataset(Dataset):
             return inputs
 
         else:  # Testing mode
-            image_path, bounding_box = self.inputs_with_boxes[idx]
+            image_path, bounding_boxes = self.inputs_with_boxes[idx]
 
             image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
 
             inputs = self.processor(
                 cv2.cvtColor(image, cv2.COLOR_GRAY2RGB),
-                input_boxes=[[bounding_box]],  # A single bounding box
+                input_boxes=[[bounding_boxes]],
                 return_tensors="pt",
             )
 
-            inputs = {k: v.squeeze(0) for k, v in inputs.items()}
             inputs["image_path"] = image_path
 
             return inputs

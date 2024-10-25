@@ -14,7 +14,6 @@ from typing import Generator, List, Dict
 def run_SAM_inference_and_save_masks(
     model: torch.nn.Module,
     test_dataset: torch.utils.data.Dataset,
-    batch_size: int = 2,
     device: str = None,
 ) -> None:
     """
@@ -28,7 +27,6 @@ def run_SAM_inference_and_save_masks(
         model (torch.nn.Module): The SAM model to use for generating segmentation masks.
         test_dataset (torch.utils.data.Dataset): The dataset for inference, with each sample containing
                                                  'pixel_values', 'input_boxes', and 'image_path'.
-        batch_size (int, optional): Number of samples to process in each batch for SAM inference. Defaults to 2.
         device (str, optional): The device to run the inference on ('cuda' or 'cpu'). If not provided,
                                 it is auto-detected based on availability.
 
@@ -41,66 +39,28 @@ def run_SAM_inference_and_save_masks(
 
     model.to(device)
 
-    masks_by_path: Dict[str, np.ndarray] = {}
+    model.eval()
 
-    def batch_generator(
-        dataset: torch.utils.data.Dataset, batch_size: int
-    ) -> Generator[List[Dict], None, None]:
-        """
-        Generates batches of samples from the dataset.
-
-        Args:
-            dataset (torch.utils.data.Dataset): The dataset to divide into batches.
-            batch_size (int): Number of samples in each batch.
-
-        Yields:
-            List[Dict]: A batch of records containing image data and associated metadata (e.g., pixel values and input boxes).
-        """
-        current_batch = []
-        for idx in range(len(dataset)):
-            sample = dataset[idx]
-            current_batch.append(sample)
-            if len(current_batch) == batch_size:
-                yield current_batch
-                current_batch = []
-        if current_batch:
-            yield current_batch
-
-    for batch in tqdm(batch_generator(test_dataset, batch_size)):
-        pixel_values = torch.stack([sample["pixel_values"] for sample in batch]).to(
-            device
-        )
-        input_boxes = torch.stack([sample["input_boxes"] for sample in batch]).to(
-            device
-        )
-
-        inputs = {
-            "pixel_values": pixel_values,
-            "input_boxes": input_boxes,
-        }
+    for sample in test_dataset:
 
         with torch.no_grad():
-            outputs = model(**inputs)
+            outputs = model(**sample, multimask_output=False)
 
-        for i, sample in enumerate(batch):
-            predicted_probabilities = (
-                torch.sigmoid(outputs.pred_masks[i].squeeze(0)).cpu().numpy()
-            )
-            binary_mask = (predicted_probabilities > 0.5).astype(np.uint8)
-            grayscale_mask = (np.max(binary_mask, axis=0) * 255).astype(np.uint8)
+        predicted_probabilities = (
+            torch.sigmoid(outputs.pred_masks.squeeze(1)).cpu().numpy().squeeze()
+        )
 
-            original_image_path = sample["image_path"]
-            mask_output_path = original_image_path.replace("test_images", "test_labels")
+        masks = (predicted_probabilities > 0.5).astype(np.uint8)
 
-            if mask_output_path in masks_by_path:
-                masks_by_path[mask_output_path] = np.maximum(
-                    masks_by_path[mask_output_path], grayscale_mask
-                )
-            else:
-                masks_by_path[mask_output_path] = grayscale_mask
+        binary_mask = np.max(masks, axis=0, keepdims=True)
 
-    for mask_output_path, mask in masks_by_path.items():
+        grayscale_mask = (np.max(binary_mask, axis=0) * 255).astype(np.uint8)
+
+        original_image_path = sample["image_path"]
+        mask_output_path = original_image_path.replace("test_images", "test_labels")
+
         output_directory = os.path.dirname(mask_output_path)
         if not os.path.exists(output_directory):
             os.makedirs(output_directory)
-        cv2.imwrite(mask_output_path, mask)
+
+        cv2.imwrite(mask_output_path, grayscale_mask)
