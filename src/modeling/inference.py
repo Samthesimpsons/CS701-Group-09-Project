@@ -5,10 +5,10 @@ on a dataset and save the resulting predicted segmentation masks as grayscale im
 
 import os
 import cv2
-from tqdm import tqdm
 import torch
 import numpy as np
 from typing import Generator, List, Dict
+from tqdm import tqdm
 
 
 def run_SAM_inference_and_save_masks(
@@ -41,13 +41,16 @@ def run_SAM_inference_and_save_masks(
 
     model.eval()
 
-    for sample in test_dataset:
+    for sample in tqdm(test_dataset):
+        for key, value in sample.items():
+            if isinstance(value, torch.Tensor):
+                sample[key] = value.to(device)
 
         with torch.no_grad():
             outputs = model(**sample, multimask_output=False)
 
         predicted_probabilities = (
-            torch.sigmoid(outputs.pred_masks.squeeze(1)).cpu().numpy().squeeze()
+            torch.sigmoid(outputs.pred_masks.squeeze(0).squeeze(1)).cpu().numpy()
         )
 
         masks = (predicted_probabilities > 0.5).astype(np.uint8)
@@ -56,6 +59,10 @@ def run_SAM_inference_and_save_masks(
 
         grayscale_mask = (np.max(binary_mask, axis=0) * 255).astype(np.uint8)
 
+        grayscale_mask_resized = cv2.resize(
+            grayscale_mask, (512, 512), interpolation=cv2.INTER_NEAREST
+        )
+
         original_image_path = sample["image_path"]
         mask_output_path = original_image_path.replace("test_images", "test_labels")
 
@@ -63,4 +70,4 @@ def run_SAM_inference_and_save_masks(
         if not os.path.exists(output_directory):
             os.makedirs(output_directory)
 
-        cv2.imwrite(mask_output_path, grayscale_mask)
+        cv2.imwrite(mask_output_path, grayscale_mask_resized)
