@@ -11,16 +11,18 @@ The module leverages popular libraries like PyTorch, MONAI, Transformers,
 and Matplotlib for the training process and visualization.
 """
 
-from typing import List
-from transformers import SamModel
-from torch.optim import Adam
-from monai.losses import DiceCELoss
-from tqdm import tqdm
-from statistics import mean
-import torch
-from torch.utils.data import DataLoader, Subset
-from sklearn.model_selection import KFold
 import matplotlib.pyplot as plt
+import torch
+import torch.nn.functional as F
+from monai.losses import DiceCELoss
+from sklearn.model_selection import KFold
+from torch.optim import Adam
+from torch.utils.data import DataLoader, Subset
+from tqdm import tqdm
+from transformers import SamModel
+from peft import LoraConfig, get_peft_model
+from statistics import mean
+from typing import List
 
 # Enable interactive plotting for visualization
 plt.ion()
@@ -66,6 +68,10 @@ class SAMTrainer:
         device: str = "cpu",
         learning_rate: float = 1e-5,
         weight_decay: float = 0,
+        lora_r: int = 8,
+        lora_alpha: int = 16,
+        lora_dropout: float = 0.1,
+        quantize_8bits: bool = False,
     ):
         """Initialize the SAMTrainer class with model, optimizer, and loss function.
 
@@ -74,8 +80,16 @@ class SAMTrainer:
             device (str): The device to use for training ('cpu' or 'cuda').
             learning_rate (float): The learning rate for the optimizer.
             weight_decay (float): The weight decay for the optimizer.
+            lora_r (int): Rank of the LoRA decomposition.
+            lora_alpha (int): Scaling factor for the LoRA parameters.
+            lora_dropout (float): Dropout rate for the LoRA layers.
+            quantize_8bits (bool): Whether to load the model in 8-bit quantization.
         """
         self.device = device
+        self.lora_r = lora_r
+        self.lora_alpha = lora_alpha
+        self.lora_dropout = lora_dropout
+        self.quantize_8bits = quantize_8bits
         self.model = self._initialize_model(model_name)
         self.optimizer = self._get_optimizer(learning_rate, weight_decay)
         self.loss_function = DiceCELoss(
@@ -83,18 +97,28 @@ class SAMTrainer:
         )
 
     def _initialize_model(self, model_name: str) -> SamModel:
-        """Load and initialize the SAM model, freezing specific layers.
+        """Load and initialize the SAM model, applying LoRA configuration.
 
         Args:
             model_name (str): The name of the model to load from Hugging Face.
 
         Returns:
-            SamModel: The initialized SAM model.
+            SamModel: The initialized SAM model with LoRA configuration.
         """
-        model = SamModel.from_pretrained(model_name)
-        for name, param in model.named_parameters():
-            if name.startswith("vision_encoder") or name.startswith("prompt_encoder"):
-                param.requires_grad_(False)
+        config = LoraConfig(
+            r=self.lora_r,
+            lora_alpha=self.lora_alpha,
+            target_modules=["q_proj", "k_proj", "v_proj", "out_proj"],
+            lora_dropout=self.lora_dropout,
+            bias="none",
+        )
+        if self.quantize_8bits:
+            model = get_peft_model(
+                SamModel.from_pretrained(model_name, load_in_8bit=True), config
+            )
+        else:
+            model = get_peft_model(SamModel.from_pretrained(model_name), config)
+        model.print_trainable_parameters()
         model.to(self.device)
         return model
 
@@ -147,6 +171,10 @@ class SAMTrainer:
                 multimask_output=False,
             )
             predicted_masks = outputs.pred_masks.squeeze(1)
+            predicted_masks = F.interpolate(
+                predicted_masks, size=(512, 512), mode="nearest-exact",
+            )
+
             ground_truth_masks = batch["ground_truth_mask"].float().to(self.device)
             loss = self._compute_loss(predicted_masks, ground_truth_masks)
 
@@ -178,6 +206,12 @@ class SAMTrainer:
                     multimask_output=False,
                 )
                 predicted_masks = outputs.pred_masks.squeeze(1)
+                predicted_masks = F.interpolate(
+                    predicted_masks,
+                    size=(512, 512),
+                    mode="nearest-exact",
+                )
+
                 ground_truth_masks = batch["ground_truth_mask"].float().to(self.device)
                 loss = self._compute_loss(predicted_masks, ground_truth_masks)
 
