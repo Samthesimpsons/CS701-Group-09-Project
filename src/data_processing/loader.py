@@ -22,7 +22,6 @@ from .visualization import parse_spacing_file
 
 def create_dataloader(
     dataset: torch.utils.data.Dataset,
-    train_ratio: float = 0.8,
     shuffle: bool = True,
     num_workers: int = 0,
     batch_size: int = 1,
@@ -32,7 +31,6 @@ def create_dataloader(
 
     Args:
         dataset (torch.utils.data.Dataset): The dataset to load into the DataLoader.
-        train_ratio (float): Proportion of the dataset used for training (default: 0.8).
         shuffle (bool): Whether to shuffle the data (default: True).
         num_workers (int): Number of worker processes to load data (default: 0).
         batch_size (int): Number of samples per batch for inference or training (default: 1).
@@ -205,11 +203,11 @@ class SAMSegmentationDataset(Dataset):
 
             ct_id, slice_num = self._extract_metadata_from_filename(image_path)
 
-            spacing = tuple(
-                self.spacing_metadata_df[self.spacing_metadata_df["CT_ID"] == ct_id][
-                    ["spacing_X", "spacing_Y"]
-                ].iloc[0]
-            )
+            # spacing = tuple(
+            #     self.spacing_metadata_df[self.spacing_metadata_df["CT_ID"] == ct_id][
+            #         ["spacing_X", "spacing_Y"]
+            #     ].iloc[0]
+            # )
 
             processed_image = apply_preprocessing_to_input_image(
                 image,
