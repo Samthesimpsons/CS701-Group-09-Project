@@ -11,15 +11,16 @@ The module leverages popular libraries like PyTorch, MONAI, Transformers,
 and Matplotlib for the training process and visualization.
 """
 
-import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
-from monai.losses import DiceCELoss
-from sklearn.model_selection import KFold
-from torch.optim import AdamW
-from torch.utils.data import DataLoader, Subset
+import matplotlib.pyplot as plt
+
 from tqdm import tqdm
 from transformers import SamModel
+from monai.losses import DiceCELoss
+from torch.optim import AdamW
+from torch.utils.data import DataLoader, Subset
+from sklearn.model_selection import KFold
 from peft import LoraConfig, get_peft_model
 from statistics import mean
 from typing import List
@@ -248,24 +249,26 @@ class SAMTrainer:
             k_folds (int): Number of folds for cross-validation.
             num_epochs (int): Number of epochs to train for each fold.
         """
-        dataset = dataloader.dataset  # Extract the dataset from the dataloader
+        dataset = dataloader.dataset
+
         kfold = KFold(n_splits=k_folds, shuffle=True)
+
         fold_training_losses, fold_validation_losses = [], []
+
         early_stopping = EarlyStopping(patience=3)
 
-        # Loop through each fold
         for fold, (train_idx, val_idx) in enumerate(kfold.split(dataset)):
-            print(f"Fold {fold + 1}/{k_folds}")
+            print(f"[Fold {fold + 1}/{k_folds}]")
 
-            # Create DataLoaders for the current fold
             train_subset = Subset(dataset, train_idx)
             val_subset = Subset(dataset, val_idx)
+
             train_loader = DataLoader(
                 train_subset, batch_size=dataloader.batch_size, shuffle=True
             )
+
             val_loader = DataLoader(val_subset, batch_size=dataloader.batch_size)
 
-            # Store losses for visualization
             training_losses, validation_losses = [], []
 
             for epoch in range(num_epochs):
@@ -276,21 +279,19 @@ class SAMTrainer:
                 validation_losses.append(val_loss)
 
                 print(
-                    f"Epoch {epoch + 1}/{num_epochs} | "
-                    f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}"
+                    f"For Epoch {epoch + 1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}"
                 )
+
                 early_stopping(val_loss)
                 if early_stopping.early_stop:
                     print("Early stopping")
                     break
-            # Store fold losses
+
             fold_training_losses.append(training_losses)
             fold_validation_losses.append(validation_losses)
 
-            # Update plot for each fold
             self._update_plot(fold + 1, training_losses, validation_losses)
 
-        print("Cross-validation completed.")
 
     def _update_plot(
         self, fold: int, training_losses: List[float], validation_losses: List[float]
@@ -309,4 +310,6 @@ class SAMTrainer:
         plt.ylabel("Loss")
         plt.title(f"Training and Validation Loss for Fold {fold}")
         plt.legend()
-        plt.pause(0.1)  # Allow plot to update
+        plt.show(block=False)
+        plt.pause(0.1)
+        plt.close()

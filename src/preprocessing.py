@@ -4,8 +4,9 @@ including resampling, cropping, contrast/brightness adjustment, and bounding box
 """
 
 import cv2
-import SimpleITK as sitk
 import numpy as np
+import SimpleITK as sitk
+
 from typing import Tuple, List, Dict
 
 

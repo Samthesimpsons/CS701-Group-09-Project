@@ -7,8 +7,9 @@ import os
 import cv2
 import torch
 import numpy as np
-from typing import Generator, List, Dict
+
 from tqdm import tqdm
+from typing import Generator, List, Dict
 
 
 def run_SAM_inference_and_save_masks(
@@ -55,12 +56,10 @@ def run_SAM_inference_and_save_masks(
 
         masks = (predicted_probabilities > 0.5).astype(np.uint8)
 
-        binary_mask = np.max(masks, axis=0, keepdims=True)
+        label_image = np.max(masks, axis=0).astype(np.uint8)
 
-        grayscale_mask = (np.max(binary_mask, axis=0) * 255).astype(np.uint8)
-
-        grayscale_mask_resized = cv2.resize(
-            grayscale_mask, (512, 512), interpolation=cv2.INTER_NEAREST
+        label_image_resized = cv2.resize(
+            label_image, (512, 512), interpolation=cv2.INTER_NEAREST
         )
 
         original_image_path = sample["image_path"]
