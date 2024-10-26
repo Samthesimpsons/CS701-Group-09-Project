@@ -56,7 +56,11 @@ def run_SAM_inference_and_save_masks(
 
         masks = (predicted_probabilities > 0.5).astype(np.uint8)
 
-        label_image = np.max(masks, axis=0).astype(np.uint8)
+        # label_image = np.max(masks, axis=0).astype(np.uint8)
+        label_image = np.zeros_like(masks[0], dtype=np.uint8)
+
+        for idx, mask in enumerate(masks, start=1):
+            label_image[mask == 1] = idx
 
         label_image_resized = cv2.resize(
             label_image, (512, 512), interpolation=cv2.INTER_NEAREST
@@ -69,4 +73,4 @@ def run_SAM_inference_and_save_masks(
         if not os.path.exists(output_directory):
             os.makedirs(output_directory)
 
-        cv2.imwrite(mask_output_path, grayscale_mask_resized)
+        cv2.imwrite(mask_output_path, label_image_resized)

@@ -292,7 +292,6 @@ class SAMTrainer:
 
             self._update_plot(fold + 1, training_losses, validation_losses)
 
-
     def _update_plot(
         self, fold: int, training_losses: List[float], validation_losses: List[float]
     ):

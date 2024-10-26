@@ -28,37 +28,37 @@ def custom_collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
     """
     Custom collate function for batching data with variable-length input_boxes.
 
-    This function stacks tensors for fields with fixed shapes (`pixel_values`, 
-    `original_sizes`, `reshaped_input_sizes`, and `ground_truth_mask`). 
-    For `input_boxes`, it pads each tensor to the maximum number of boxes 
+    This function stacks tensors for fields with fixed shapes (`pixel_values`,
+    `original_sizes`, `reshaped_input_sizes`, and `ground_truth_mask`).
+    For `input_boxes`, it pads each tensor to the maximum number of boxes
     in the batch, ensuring all entries have uniform shape.
 
     Args:
-        batch (List[Dict[str, Any]]): A list of dictionaries, each representing a single 
+        batch (List[Dict[str, Any]]): A list of dictionaries, each representing a single
             record with the following keys:
-            
+
             - 'pixel_values' (torch.Tensor): Tensor of shape [3, 1024, 1024].
             - 'original_sizes' (torch.Tensor): Tensor representing original input sizes.
             - 'reshaped_input_sizes' (torch.Tensor): Tensor representing reshaped input sizes.
-            - 'input_boxes' (torch.Tensor): Tensor of bounding boxes with shape [N, 4], where N 
+            - 'input_boxes' (torch.Tensor): Tensor of bounding boxes with shape [N, 4], where N
               varies per record.
             - 'ground_truth_mask' (torch.Tensor): Mask tensor of shape [512, 512].
 
     Returns:
         Dict[str, torch.Tensor]: A dictionary containing batched tensors:
-        
+
             - 'pixel_values': Tensor of shape [batch_size, 3, 1024, 1024].
             - 'original_sizes': Tensor of shape [batch_size, 2].
             - 'reshaped_input_sizes': Tensor of shape [batch_size, 2].
             - 'input_boxes': Tensor of shape [batch_size, max_boxes, 4], padded with zeros.
             - 'ground_truth_masks': Tensor of shape [batch_size, 512, 512].
     """
-    pixel_values = torch.stack([item['pixel_values'] for item in batch])
-    original_sizes = torch.stack([item['original_sizes'] for item in batch])
-    reshaped_input_sizes = torch.stack([item['reshaped_input_sizes'] for item in batch])
-    ground_truth_masks = torch.stack([item['ground_truth_mask'] for item in batch])
+    pixel_values = torch.stack([item["pixel_values"] for item in batch])
+    original_sizes = torch.stack([item["original_sizes"] for item in batch])
+    reshaped_input_sizes = torch.stack([item["reshaped_input_sizes"] for item in batch])
+    ground_truth_masks = torch.stack([item["ground_truth_mask"] for item in batch])
 
-    input_boxes = [item['input_boxes'] for item in batch]
+    input_boxes = [item["input_boxes"] for item in batch]
     max_boxes = max(box.shape[0] for box in input_boxes)
     padded_boxes = []
 
@@ -69,11 +69,11 @@ def custom_collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
     padded_boxes = torch.stack(padded_boxes)
 
     return {
-        'pixel_values': pixel_values,
-        'original_sizes': original_sizes,
-        'reshaped_input_sizes': reshaped_input_sizes,
-        'input_boxes': padded_boxes,
-        'ground_truth_masks': ground_truth_masks
+        "pixel_values": pixel_values,
+        "original_sizes": original_sizes,
+        "reshaped_input_sizes": reshaped_input_sizes,
+        "input_boxes": padded_boxes,
+        "ground_truth_masks": ground_truth_masks,
     }
 
 
@@ -100,7 +100,7 @@ def create_dataloader(
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        collate_fn=custom_collate_fn
+        collate_fn=custom_collate_fn,
     )
 
 
