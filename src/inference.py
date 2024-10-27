@@ -15,7 +15,7 @@ from typing import Generator, List, Dict
 def run_SAM_inference_and_save_masks(
     model: torch.nn.Module,
     test_dataset: torch.utils.data.Dataset,
-    batch_size: int = 2,
+    batch_size: int = 10,
     device: str = None,
 ) -> None:
     """
@@ -69,11 +69,7 @@ def run_SAM_inference_and_save_masks(
         if current_batch:
             yield current_batch
 
-    batch_counter = 0
     for batch in tqdm(batch_generator(test_dataset, batch_size)):
-        if batch_counter == 3:
-            print("Processed batches, breaking out of the loop.")
-            break
         pixel_values = torch.stack([sample["pixel_values"] for sample in batch]).to(
             device
         )
@@ -111,7 +107,6 @@ def run_SAM_inference_and_save_masks(
                 )
             else:
                 masks_by_path[mask_output_path] = binary_mask
-        batch_counter +=1
 
     for mask_output_path, mask in masks_by_path.items():
         output_directory = os.path.dirname(mask_output_path)
