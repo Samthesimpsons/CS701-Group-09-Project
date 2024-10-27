@@ -13,16 +13,14 @@ import numpy as np
 
 from torch.utils.data import Dataset, DataLoader
 from transformers import SamProcessor
-from collections import defaultdict
 from .preprocessing import (
-
+    adjust_contrast_brightness,
+    add_gaussian_noise,
+    normalize_to_unit_range,
     get_bounding_boxes,
 )
 from .visualization import parse_spacing_file
 from typing import Tuple, Dict, List, Any, Optional
-from typing import List, Dict, Any
-import torch
-
 
 
 def create_dataloader(
@@ -200,7 +198,9 @@ class SAMSegmentationDataset(Dataset):
             and either the ground truth mask (for training) or image path (for testing).
         """
         if self.mask_dir:  # Training mode
-            image_path, mask_path, bounding_box, organ_class = self.input_with_metadata[idx]
+            image_path, mask_path, bounding_box, organ_class = self.input_with_metadata[
+                idx
+            ]
 
             image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
@@ -211,8 +211,8 @@ class SAMSegmentationDataset(Dataset):
             ct_id, slice_num = self._extract_metadata_from_filename(image_path)
 
             # Preprocessing Stage
-            processed_mask = np.where(processed_mask > 0, 1, 0)
-            processed_image = adjust_contrast_brightness(processed_image)
+            processed_mask = np.where(mask > 0, 1, 0)
+            processed_image = adjust_contrast_brightness(image)
             processed_image = add_gaussian_noise(processed_image)
             processed_image = normalize_to_unit_range(processed_image)
 
@@ -222,8 +222,8 @@ class SAMSegmentationDataset(Dataset):
                 return_tensors="pt",
             )
 
-            # SamProcessor auto adds batch dimension, so we remove it to do our 
-            # own batch processing with dataloader    
+            # SamProcessor auto adds batch dimension, so we remove it to do our
+            # own batch processing with dataloader
             inputs = {k: v.squeeze(0) for k, v in inputs.items()}
 
             inputs["ground_truth_mask"] = torch.tensor(
@@ -240,7 +240,7 @@ class SAMSegmentationDataset(Dataset):
             image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
 
             # Preprocessing Stage
-            processed_image = normalize_to_unit_range(processed_image)
+            processed_image = normalize_to_unit_range(image)
 
             inputs = self.processor(
                 cv2.cvtColor(processed_image, cv2.COLOR_GRAY2RGB),

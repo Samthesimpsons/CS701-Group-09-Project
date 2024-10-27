@@ -94,12 +94,14 @@ def run_SAM_inference_and_save_masks(
 
             binary_mask = cv2.resize(
                 # To match back the train labels where the segmentation mask values are equal to the class organ label index
-                src=(predicted_probabilities > 0.5).astype(np.uint8)*organ_labels[i],
+                src=(predicted_probabilities > 0.5).astype(np.uint8) * organ_labels[i],
                 dsize=(512, 512),
-                interpolation=cv2.INTER_NEAREST
+                interpolation=cv2.INTER_NEAREST,
             )
 
-            mask_output_path = sample["image_path"].replace("test_images", "test_labels")
+            mask_output_path = sample["image_path"].replace(
+                "test_images", "test_labels"
+            )
 
             if mask_output_path in masks_by_path:
                 masks_by_path[mask_output_path] = np.maximum(

@@ -11,9 +11,7 @@ from typing import Tuple, List, Dict
 
 
 def adjust_contrast_brightness(
-    image: np.ndarray, 
-    alpha_range: tuple = (0.9, 1.3), 
-    beta_range: tuple = (-10, 10)
+    image: np.ndarray, alpha_range: tuple = (0.9, 1.3), beta_range: tuple = (-10, 10)
 ) -> np.ndarray:
     """Randomly adjust the contrast and brightness of an image.
 
@@ -27,14 +25,12 @@ def adjust_contrast_brightness(
     """
     alpha = random.uniform(*alpha_range)
     beta = random.randint(*beta_range)
-    
+
     return cv2.convertScaleAbs(image, alpha=alpha, beta=beta)
 
 
 def add_gaussian_noise(
-    image: np.ndarray, 
-    mean_range: tuple = (0, 0), 
-    std_dev_range: tuple = (10, 50)
+    image: np.ndarray, mean_range: tuple = (0, 0), std_dev_range: tuple = (10, 50)
 ) -> np.ndarray:
     """Randomly add Gaussian noise to an image.
 
@@ -48,12 +44,12 @@ def add_gaussian_noise(
     """
     mean = random.uniform(*mean_range)
     std_dev = random.uniform(*std_dev_range)
-    
+
     noise = np.random.normal(mean, std_dev, image.shape).astype(np.float32)
     noisy_image = cv2.add(image.astype(np.float32), noise)
 
     noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
-    
+
     return noisy_image
 
 
@@ -76,14 +72,14 @@ def resample_and_resize(
     interpolator: int = sitk.sitkNearestNeighbor,
 ) -> np.ndarray:
     """Resamples a 2D grayscale image to a new pixel spacing and resizes it back to the original size.
-    
+
     Args:
         image_np (np.ndarray): Input grayscale image as a NumPy array with shape (H, W).
         original_spacing (Tuple[float, float]): Original pixel spacing as (spacing_y, spacing_x).
         new_spacing (Tuple[float, float], optional): Desired pixel spacing as (new_spacing_y, new_spacing_x).
             Default is (1.0, 1.0).
         interpolator (int, optional): Interpolation method (default is sitk.sitkNearestNeighbor).
-    
+
     Returns:
         np.ndarray: Resampled and resized 2D grayscale image as a NumPy array with the original size.
     """
@@ -120,11 +116,12 @@ def resample_and_resize(
     target_y_end = target_y_start + (y_end - y_start)
     target_x_end = target_x_start + (x_end - x_start)
 
-    pad_or_crop_image[target_y_start:target_y_end, target_x_start:target_x_end] = resampled_image[
-        y_start:y_end, x_start:x_end
-    ]
+    pad_or_crop_image[target_y_start:target_y_end, target_x_start:target_x_end] = (
+        resampled_image[y_start:y_end, x_start:x_end]
+    )
 
     return pad_or_crop_image
+
 
 def get_bounding_boxes(
     mask_array: np.ndarray, CT_number: str, scan_number: int

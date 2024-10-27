@@ -7,12 +7,12 @@
 .PHONY: lint typing check-all test
 
 lint:
-	poetry run ruff check src tests --fix
-	poetry run black src tests
+	poetry run ruff check src --fix
+	poetry run black src
 	poetry run black notebooks/
 
 typing:
-	poetry run mypy src tests
+	poetry run mypy src
 
 test:
 	poetry run pytest --cov=src --cov-report=term-missing

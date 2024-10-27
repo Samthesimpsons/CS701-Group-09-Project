@@ -11,11 +11,13 @@ The module leverages popular libraries like PyTorch, MONAI, Transformers,
 and Matplotlib for the training process and visualization.
 """
 
+import os
 import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
 from tqdm import tqdm
+from datetime import datetime
 from transformers import SamModel
 from monai.losses import DiceCELoss
 from monai.metrics import DiceMetric
@@ -98,11 +100,7 @@ class SAMTrainer:
             reduction="mean",
         )
         # TODO: Add NSC, but need parse in the spacing from spacing_mm.txt
-        self.metric_function = DiceMetric(
-            include_background=True,
-            reduction="mean"
-        )
-
+        self.metric_function = DiceMetric(include_background=True, reduction="mean")
 
     def _initialize_model(self, model_name: str) -> SamModel:
         """Load and initialize the SAM model, applying LoRA configuration.
@@ -186,8 +184,25 @@ class SAMTrainer:
         Returns:
             torch.Tensor: The computed metric.
         """
-        metric = self.metric_function(y_pred=predicted_masks, y=ground_truth_masks)
+        return self.metric_function(y_pred=predicted_masks, y=ground_truth_masks)
 
+    def save_pretrained(self, base_directory: str):
+        """Save the model with a folder named by model name and timestamp.
+
+        Args:
+            base_directory (str): The base directory to save the model.
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_directory = os.path.join(base_directory, f"medsam_finetuned_{timestamp}")
+
+        os.makedirs(save_directory, exist_ok=True)
+
+        original_device = next(self.model.parameters()).device
+        self.model.to("cpu")
+        self.model.save_pretrained(save_directory, safe_serialization=False)
+        self.model.to(original_device)
+
+        print(f"Model saved to {save_directory}")
 
     def train_one_epoch(self, train_dataloader: DataLoader) -> float:
         """Train the model for one epoch.
@@ -215,7 +230,7 @@ class SAMTrainer:
             )
 
             ground_truth_masks = batch["ground_truth_mask"].float().to(self.device)
-        
+
             loss = self._compute_loss(predicted_masks, ground_truth_masks)
 
             self.optimizer.zero_grad()
@@ -279,7 +294,11 @@ class SAMTrainer:
 
         kfold = KFold(n_splits=k_folds, shuffle=True)
 
-        fold_training_losses, fold_validation_losses, fold_validation_scores = [], [], []
+        fold_training_losses, fold_validation_losses, fold_validation_scores = (
+            [],
+            [],
+            [],
+        )
 
         early_stopping = EarlyStopping(patience=3)
 
@@ -318,10 +337,16 @@ class SAMTrainer:
             fold_validation_losses.append(validation_losses)
             fold_validation_scores.append(validation_scores)
 
-            self._update_plot(fold + 1, training_losses, validation_losses, fold_validation_scores)
+            self._update_plot(
+                fold + 1, training_losses, validation_losses, fold_validation_scores
+            )
 
     def _update_plot(
-        self, fold: int, training_losses: List[float], validation_losses: List[float], validation_scores: List[float]
+        self,
+        fold: int,
+        training_losses: List[float],
+        validation_losses: List[float],
+        validation_scores: List[float],
     ):
         """Update the loss and score plot for each fold.
 
@@ -339,7 +364,9 @@ class SAMTrainer:
         # Plot validation score on a secondary y-axis
         ax1 = plt.gca()  # Get the current axis for losses
         ax2 = ax1.twinx()  # Create a secondary axis for the score
-        ax2.plot(validation_scores, label="Validation Score", color="green", linestyle="--")
+        ax2.plot(
+            validation_scores, label="Validation Score", color="green", linestyle="--"
+        )
 
         ax1.set_xlabel("Epoch")
         ax1.set_ylabel("Loss")
