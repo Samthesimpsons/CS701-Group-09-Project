@@ -24,7 +24,7 @@ from torch.utils.data import DataLoader, Subset
 from sklearn.model_selection import KFold
 from peft import LoraConfig, get_peft_model
 from statistics import mean
-from typing import List
+from typing import List, Tuple
 
 # Enable interactive plotting for visualization
 plt.ion()
