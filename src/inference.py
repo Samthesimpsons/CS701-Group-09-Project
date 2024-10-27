@@ -15,6 +15,7 @@ from typing import Generator, List, Dict
 def run_SAM_inference_and_save_masks(
     model: torch.nn.Module,
     test_dataset: torch.utils.data.Dataset,
+    batch_size: int = 2,
     device: str = None,
 ) -> None:
     """
@@ -28,6 +29,7 @@ def run_SAM_inference_and_save_masks(
         model (torch.nn.Module): The SAM model to use for generating segmentation masks.
         test_dataset (torch.utils.data.Dataset): The dataset for inference, with each sample containing
                                                  'pixel_values', 'input_boxes', and 'image_path'.
+        batch_size (int, optional): Number of samples to process in each batch for SAM inference. Defaults to 2.
         device (str, optional): The device to run the inference on ('cuda' or 'cpu'). If not provided,
                                 it is auto-detected based on availability.
 
@@ -42,35 +44,79 @@ def run_SAM_inference_and_save_masks(
 
     model.eval()
 
-    for sample in tqdm(test_dataset):
-        for key, value in sample.items():
-            if isinstance(value, torch.Tensor):
-                sample[key] = value.to(device)
+    masks_by_path: Dict[str, np.ndarray] = {}
+
+    def batch_generator(
+        dataset: torch.utils.data.Dataset, batch_size: int
+    ) -> Generator[List[Dict], None, None]:
+        """
+        Generates batches of samples from the dataset.
+
+        Args:
+            dataset (torch.utils.data.Dataset): The dataset to divide into batches.
+            batch_size (int): Number of samples in each batch.
+
+        Yields:
+            List[Dict]: A batch of records containing image data and associated metadata (e.g., pixel values and input boxes).
+        """
+        current_batch = []
+        for idx in range(len(dataset)):
+            sample = dataset[idx]
+            current_batch.append(sample)
+            if len(current_batch) == batch_size:
+                yield current_batch
+                current_batch = []
+        if current_batch:
+            yield current_batch
+
+    batch_counter = 0
+    for batch in tqdm(batch_generator(test_dataset, batch_size)):
+        if batch_counter == 3:
+            print("Processed batches, breaking out of the loop.")
+            break
+        pixel_values = torch.stack([sample["pixel_values"] for sample in batch]).to(
+            device
+        )
+        input_boxes = torch.stack([sample["input_boxes"] for sample in batch]).to(
+            device
+        )
+        organ_labels = [sample["organ_class"] for sample in batch]
+        inputs = {
+            "pixel_values": pixel_values,
+            "input_boxes": input_boxes,
+        }
 
         with torch.no_grad():
-            outputs = model(**sample, multimask_output=False)
+            outputs = model(**inputs, multimask_output=False)
 
-        predicted_probabilities = (
-            torch.sigmoid(outputs.pred_masks.squeeze(0).squeeze(1)).cpu().numpy()
-        )
+        for i, sample in enumerate(batch):
+            predicted_probabilities = (
+                torch.sigmoid(outputs.pred_masks[i]).cpu().numpy().squeeze()
+            )
 
-        masks = (predicted_probabilities > 0.5).astype(np.uint8)
+            binary_mask = (predicted_probabilities > 0.5).astype(np.uint8)
 
-        # label_image = np.max(masks, axis=0).astype(np.uint8)
-        label_image = np.zeros_like(masks[0], dtype=np.uint8)
+            binary_mask = cv2.resize(
+                # To match back the train labels where the segmentation mask values are equal to the class organ label index
+                src=(predicted_probabilities > 0.5).astype(np.uint8)*organ_labels[i],
+                dsize=(512, 512),
+                interpolation=cv2.INTER_NEAREST
+            )
 
-        for idx, mask in enumerate(masks, start=1):
-            label_image[mask == 1] = idx
+            mask_output_path = sample["image_path"].replace("test_images", "test_labels")
 
-        label_image_resized = cv2.resize(
-            label_image, (512, 512), interpolation=cv2.INTER_NEAREST
-        )
+            if mask_output_path in masks_by_path:
+                masks_by_path[mask_output_path] = np.maximum(
+                    masks_by_path[mask_output_path], binary_mask
+                )
+            else:
+                masks_by_path[mask_output_path] = binary_mask
+        batch_counter +=1
 
-        original_image_path = sample["image_path"]
-        mask_output_path = original_image_path.replace("test_images", "test_labels")
-
+    for mask_output_path, mask in masks_by_path.items():
         output_directory = os.path.dirname(mask_output_path)
+
         if not os.path.exists(output_directory):
             os.makedirs(output_directory)
 
-        cv2.imwrite(mask_output_path, label_image_resized)
+        cv2.imwrite(mask_output_path, mask)
