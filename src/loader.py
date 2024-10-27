@@ -15,8 +15,7 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import SamProcessor
 from collections import defaultdict
 from .preprocessing import (
-    apply_preprocessing_to_input_image,
-    apply_preprocessing_to_label_mask,
+
     get_bounding_boxes,
 )
 from .visualization import parse_spacing_file
@@ -84,10 +83,10 @@ class SAMSegmentationDataset(Dataset):
 
         if self.mask_dir:
             self.image_files, self.mask_files = self._load_image_mask_paths()
-            self.inputs_with_boxes = self._prepare_training_inputs()
+            self.input_with_metadata = self._prepare_training_inputs()
         elif self.bbox_file_dir:
             self.bbox_data = self._load_bounding_boxes(self.bbox_file_dir)
-            self.inputs_with_boxes = self._prepare_testing_inputs()
+            self.input_with_metadata = self._prepare_testing_inputs()
 
     def _load_image_mask_paths(self) -> Tuple[List[str], List[str]]:
         """
@@ -144,7 +143,7 @@ class SAMSegmentationDataset(Dataset):
         Returns:
             List[Tuple[str, str, List[int], int]]: A list of tuples containing image paths, mask paths, bounding boxes and organ classes.
         """
-        inputs_with_boxes = []
+        input_with_metadata = []
 
         for idx in range(len(self.image_files)):
             image_path = self.image_files[idx]
@@ -158,9 +157,9 @@ class SAMSegmentationDataset(Dataset):
 
             for metadata, bbox in bounding_boxes_dict.items():
                 organ_class = int(metadata.strip("<>").split(", ")[-1])
-                inputs_with_boxes.append((image_path, mask_path, bbox, organ_class))
+                input_with_metadata.append((image_path, mask_path, bbox, organ_class))
 
-        return inputs_with_boxes
+        return input_with_metadata
 
     def _prepare_testing_inputs(self) -> List[Tuple[str, List[int]]]:
         """
@@ -168,17 +167,17 @@ class SAMSegmentationDataset(Dataset):
         Returns:
             List[Tuple[str, List[int], int]]: A list of tuples containing image paths, bounding boxes and organ classes.
         """
-        inputs_with_boxes = []
+        input_with_metadata = []
 
         for (ct_id, slice_num, organ_class), bbox in self.bbox_data.items():
             image_path = os.path.join(self.image_dir, ct_id, f"{slice_num}.png")
 
             if os.path.exists(image_path):
-                inputs_with_boxes.append((image_path, bbox, organ_class))
+                input_with_metadata.append((image_path, bbox, organ_class))
             else:
                 print(f"Warning: Image {image_path} not found, skipping.")
 
-        return inputs_with_boxes
+        return input_with_metadata
 
     def __len__(self) -> int:
         """
@@ -187,7 +186,7 @@ class SAMSegmentationDataset(Dataset):
         Returns:
             int: The total number of input samples (bounding box-based).
         """
-        return len(self.inputs_with_boxes)
+        return len(self.input_with_metadata)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """
@@ -201,7 +200,7 @@ class SAMSegmentationDataset(Dataset):
             and either the ground truth mask (for training) or image path (for testing).
         """
         if self.mask_dir:  # Training mode
-            image_path, mask_path, bounding_box, organ_class = self.inputs_with_boxes[idx]
+            image_path, mask_path, bounding_box, organ_class = self.input_with_metadata[idx]
 
             image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
@@ -211,8 +210,11 @@ class SAMSegmentationDataset(Dataset):
 
             ct_id, slice_num = self._extract_metadata_from_filename(image_path)
 
-            processed_image = apply_preprocessing_to_input_image(image)
-            processed_mask = apply_preprocessing_to_label_mask(mask)
+            # Preprocessing Stage
+            processed_mask = np.where(processed_mask > 0, 1, 0)
+            processed_image = adjust_contrast_brightness(processed_image)
+            processed_image = add_gaussian_noise(processed_image)
+            processed_image = normalize_to_unit_range(processed_image)
 
             inputs = self.processor(
                 cv2.cvtColor(processed_image, cv2.COLOR_GRAY2RGB),
@@ -220,7 +222,8 @@ class SAMSegmentationDataset(Dataset):
                 return_tensors="pt",
             )
 
-            # SamProcessor auto adds batch dimension, so we remove it to do our own batch processing with dataloader    
+            # SamProcessor auto adds batch dimension, so we remove it to do our 
+            # own batch processing with dataloader    
             inputs = {k: v.squeeze(0) for k, v in inputs.items()}
 
             inputs["ground_truth_mask"] = torch.tensor(
@@ -232,12 +235,15 @@ class SAMSegmentationDataset(Dataset):
             return inputs
 
         else:  # Testing mode
-            image_path, bounding_box, organ_class = self.inputs_with_boxes[idx]
+            image_path, bounding_box, organ_class = self.input_with_metadata[idx]
 
             image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
 
+            # Preprocessing Stage
+            processed_image = normalize_to_unit_range(processed_image)
+
             inputs = self.processor(
-                cv2.cvtColor(image, cv2.COLOR_GRAY2RGB),
+                cv2.cvtColor(processed_image, cv2.COLOR_GRAY2RGB),
                 input_boxes=[[bounding_box]],
                 return_tensors="pt",
             )

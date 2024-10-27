@@ -4,63 +4,127 @@ including contrast/brightness adjustment, and bounding box extraction.
 """
 
 import cv2
+import random
 import numpy as np
+import SimpleITK as sitk
 from typing import Tuple, List, Dict
 
 
 def adjust_contrast_brightness(
-    image: np.ndarray, alpha: float, beta: int
+    image: np.ndarray, 
+    alpha_range: tuple = (0.9, 1.3), 
+    beta_range: tuple = (-10, 10)
 ) -> np.ndarray:
-    """Adjust the contrast and brightness of an image.
+    """Randomly adjust the contrast and brightness of an image.
 
     Args:
         image (np.ndarray): Input image, can be grayscale or color (3-channel).
-        alpha (float): Contrast factor. Values > 1 increase contrast, < 1 decrease contrast.
-        beta (int): Brightness factor. Positive values increase brightness, negative values decrease it.
+        alpha_range (tuple): Range for contrast factor. Values > 1 increase contrast, < 1 decrease contrast.
+        beta_range (tuple): Range for brightness adjustment. Positive values increase brightness, negative values decrease it.
 
     Returns:
-        np.ndarray: Image with adjusted contrast and brightness.
+        np.ndarray: Image with randomly adjusted contrast and brightness.
     """
+    alpha = random.uniform(*alpha_range)
+    beta = random.randint(*beta_range)
+    
     return cv2.convertScaleAbs(image, alpha=alpha, beta=beta)
 
 
-def apply_preprocessing_to_input_image(
-    image: np.ndarray,
-    alpha: float = 1.1,
-    beta: int = 5,
+def add_gaussian_noise(
+    image: np.ndarray, 
+    mean_range: tuple = (0, 0), 
+    std_dev_range: tuple = (10, 50)
 ) -> np.ndarray:
-    """Apply preprocessing steps to an input image.
+    """Randomly add Gaussian noise to an image.
 
     Args:
-        image (np.ndarray): Input 2D grayscale iamge (NumPy array with 2 dimensions).
-        alpha (float): Contrast adjustment factor.
-        beta (int): Brightness adjustment factor.
+        image (np.ndarray): Input image, can be grayscale or color (3-channel).
+        mean_range (tuple): Range for mean of the Gaussian noise.
+        std_dev_range (tuple): Range for standard deviation of the Gaussian noise.
 
     Returns:
-        np.ndarray: Preprocessed image.
+        np.ndarray: Image with Gaussian noise added.
     """
+    mean = random.uniform(*mean_range)
+    std_dev = random.uniform(*std_dev_range)
+    
+    noise = np.random.normal(mean, std_dev, image.shape).astype(np.float32)
+    noisy_image = cv2.add(image.astype(np.float32), noise)
 
-    image = adjust_contrast_brightness(image, alpha, beta)
+    noisy_image = np.clip(noisy_image, 0, 255).astype(np.uint8)
+    
+    return noisy_image
 
-    return image
 
-
-def apply_preprocessing_to_label_mask(
-    labels: np.ndarray,
-) -> np.ndarray:
-    """Apply preprocessing steps to a label mask.
+def normalize_to_unit_range(image: np.ndarray) -> np.ndarray:
+    """Normalize the image to the range [0, 1].
 
     Args:
-        labels (np.ndarray): Input 2D grayscale label iamge (NumPy array with 2 dimensions).
+        image (np.ndarray): Input image with pixel values in the range [0, 255].
 
     Returns:
-        np.ndarray: Preprocessed label mask.
+        np.ndarray: Normalized image with pixel values in the range [0, 1].
     """
+    return image.astype(np.float32) / 255.0
 
-    labels = np.where(labels > 0, 1, 0)
 
-    return labels
+def resample_and_resize(
+    image_np: np.ndarray,
+    original_spacing: Tuple[float, float],
+    new_spacing: Tuple[float, float] = (1.0, 1.0),
+    interpolator: int = sitk.sitkNearestNeighbor,
+) -> np.ndarray:
+    """Resamples a 2D grayscale image to a new pixel spacing and resizes it back to the original size.
+    
+    Args:
+        image_np (np.ndarray): Input grayscale image as a NumPy array with shape (H, W).
+        original_spacing (Tuple[float, float]): Original pixel spacing as (spacing_y, spacing_x).
+        new_spacing (Tuple[float, float], optional): Desired pixel spacing as (new_spacing_y, new_spacing_x).
+            Default is (1.0, 1.0).
+        interpolator (int, optional): Interpolation method (default is sitk.sitkNearestNeighbor).
+    
+    Returns:
+        np.ndarray: Resampled and resized 2D grayscale image as a NumPy array with the original size.
+    """
+    target_size = image_np.shape
 
+    sitk_image = sitk.GetImageFromArray(image_np)
+    sitk_image.SetSpacing(original_spacing)
+
+    original_size = np.array(sitk_image.GetSize())
+    new_size = (
+        np.round(original_size * np.array(original_spacing) / np.array(new_spacing))
+        .astype(int)
+        .tolist()
+    )
+
+    # Resample the image
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetOutputSpacing(new_spacing)
+    resampler.SetSize(new_size)
+    resampler.SetInterpolator(interpolator)
+    resampler.SetOutputOrigin(sitk_image.GetOrigin())
+    resampler.SetOutputDirection(sitk_image.GetDirection())
+    resampled_image = sitk.GetArrayFromImage(resampler.Execute(sitk_image))
+
+    # Center crop or pad the image to match the original size
+    pad_or_crop_image = np.zeros(target_size, dtype=resampled_image.dtype)
+    height, width = resampled_image.shape
+    y_start = max((height - target_size[0]) // 2, 0)
+    x_start = max((width - target_size[1]) // 2, 0)
+    y_end = y_start + min(target_size[0], height)
+    x_end = x_start + min(target_size[1], width)
+    target_y_start = max((target_size[0] - height) // 2, 0)
+    target_x_start = max((target_size[1] - width) // 2, 0)
+    target_y_end = target_y_start + (y_end - y_start)
+    target_x_end = target_x_start + (x_end - x_start)
+
+    pad_or_crop_image[target_y_start:target_y_end, target_x_start:target_x_end] = resampled_image[
+        y_start:y_end, x_start:x_end
+    ]
+
+    return pad_or_crop_image
 
 def get_bounding_boxes(
     mask_array: np.ndarray, CT_number: str, scan_number: int
