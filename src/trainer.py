@@ -6,15 +6,13 @@ the DiceCELoss function for segmentation.
 
 Additionally, an `EarlyStopping` class is implemented to halt training if 
 the validation loss does not improve after a set number of epochs (patience).
-
-The module leverages popular libraries like PyTorch, MONAI, Transformers, 
-and Matplotlib for the training process and visualization.
 """
 
 import os
 import torch
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
+import pandas as pd
+
 from tqdm import tqdm
 from datetime import datetime
 from transformers import SamModel
@@ -25,10 +23,6 @@ from torch.optim.lr_scheduler import StepLR
 from sklearn.model_selection import KFold
 from peft import LoraConfig, get_peft_model
 from statistics import mean
-from typing import List
-
-# Enable interactive plotting for visualization
-plt.ion()
 
 
 class EarlyStopping:
@@ -290,7 +284,7 @@ class SAMTrainer:
 
     def k_fold_cross_validation(
         self, dataloader: DataLoader, k_folds: int = 5, num_epochs: int = 10
-    ):
+    ) -> pd.DataFrame:
         """
         Perform K-Fold Cross-Validation on the dataset.
 
@@ -298,38 +292,40 @@ class SAMTrainer:
             dataloader (DataLoader): The dataloader containing the dataset.
             k_folds (int): Number of folds for cross-validation.
             num_epochs (int): Number of epochs to train for each fold.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing fold, epoch, train loss, and validation loss for each fold.
         """
         dataset = dataloader.dataset
-
         kfold = KFold(n_splits=k_folds, shuffle=True)
-
-        fold_training_losses, fold_validation_losses = [], []
-
         early_stopping = EarlyStopping(patience=3)
 
-        for fold, (train_idx, val_idx) in enumerate(kfold.split(dataset)):
-            print(f"[Fold {fold + 1}/{k_folds}]")
+        losses = []
 
+        for fold, (train_idx, val_idx) in enumerate(
+            tqdm(kfold.split(dataset), desc="Folds", total=k_folds)
+        ):
             train_subset = Subset(dataset, train_idx)
             val_subset = Subset(dataset, val_idx)
 
             train_loader = DataLoader(
                 train_subset, batch_size=dataloader.batch_size, shuffle=True
             )
-
             val_loader = DataLoader(val_subset, batch_size=dataloader.batch_size)
 
-            training_losses, validation_losses = [], []
-
-            for epoch in range(num_epochs):
+            for epoch in tqdm(
+                range(num_epochs), desc=f"Epochs for Fold {fold+1}", leave=True
+            ):
                 train_loss = self.train_one_epoch(train_loader)
                 val_loss = self.validate(val_loader)
 
-                training_losses.append(train_loss)
-                validation_losses.append(val_loss)
-
-                print(
-                    f"For Epoch {epoch + 1}/{num_epochs} | Train DiceCE Loss: {train_loss:.4f} | Val DiceCE Loss: {val_loss:.4f}"
+                losses.append(
+                    {
+                        "Fold": fold + 1,
+                        "Epoch": epoch + 1,
+                        "Train_DiceCE_Loss": train_loss,
+                        "Val_DiceCE_Loss": val_loss,
+                    }
                 )
 
                 early_stopping(val_loss, self.model)
@@ -337,35 +333,5 @@ class SAMTrainer:
                     print("Early stopping")
                     break
 
-            fold_training_losses.append(training_losses)
-            fold_validation_losses.append(validation_losses)
-
-            self._update_plot(fold + 1, training_losses, validation_losses)
-
-    def _update_plot(
-        self,
-        fold: int,
-        training_losses: List[float],
-        validation_losses: List[float],
-    ):
-        """
-        Update the loss plot for each fold.
-
-        Args:
-            fold (int): The current fold number.
-            training_losses (List[float]): List of training losses for each epoch.
-            validation_losses (List[float]): List of validation losses for each epoch.
-        """
-        plt.figure(fold)
-
-        plt.plot(training_losses, label="Training Loss", color="blue")
-        plt.plot(validation_losses, label="Validation Loss", color="orange")
-
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.title(f"Training and Validation Loss for Fold {fold}")
-        plt.legend(loc="upper right")
-
-        plt.show(block=False)
-        plt.pause(0.1)
-        plt.close()
+        losses_df = pd.DataFrame(losses)
+        return losses_df
