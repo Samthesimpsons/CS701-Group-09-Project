@@ -15,52 +15,61 @@ import os
 import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-
 from tqdm import tqdm
 from datetime import datetime
 from transformers import SamModel
 from monai.losses import DiceCELoss
-from monai.metrics import DiceMetric
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Subset
+from torch.optim.lr_scheduler import StepLR
 from sklearn.model_selection import KFold
 from peft import LoraConfig, get_peft_model
 from statistics import mean
-from typing import List, Tuple
+from typing import List
 
 # Enable interactive plotting for visualization
 plt.ion()
 
 
 class EarlyStopping:
-    def __init__(self, patience=5, delta=0):
-        """Initialize the EarlyStopping mechanism.
+    def __init__(self, patience: int = 5, delta: float = 0, restore_best: bool = True):
+        """
+        Initialize the EarlyStopping mechanism.
 
         Args:
             patience (int): Number of epochs to wait before stopping if no improvement.
             delta (float): Minimum change to qualify as an improvement.
+            restore_best (bool): Whether to restore the model to its best state.
         """
         self.patience = patience
         self.delta = delta
         self.best_loss = None
         self.counter = 0
         self.early_stop = False
+        self.restore_best = restore_best
+        self.best_model_state = None
 
-    def __call__(self, val_loss):
-        """Check whether to stop training based on validation loss.
+    def __call__(self, val_loss: float, model: torch.nn.Module):
+        """
+        Check whether to stop training based on validation loss.
 
         Args:
             val_loss (float): The current validation loss.
+            model (torch.nn.Module): The model being trained.
         """
-        if self.best_loss is None:
+        if self.best_loss is None or val_loss < self.best_loss - self.delta:
             self.best_loss = val_loss
-        elif val_loss > self.best_loss + self.delta:
+            self.counter = 0
+            if self.restore_best:
+                self.best_model_state = {
+                    k: v.clone() for k, v in model.state_dict().items()
+                }
+        else:
             self.counter += 1
             if self.counter >= self.patience:
                 self.early_stop = True
-        else:
-            self.best_loss = val_loss
-            self.counter = 0
+                if self.restore_best:
+                    model.load_state_dict(self.best_model_state)
 
 
 class SAMTrainer:
@@ -76,7 +85,8 @@ class SAMTrainer:
         lora_dropout: float = 0,
         quantize_8bits: bool = False,
     ):
-        """Initialize the SAMTrainer class with model, optimizer, and loss function.
+        """
+        Initialize the SAMTrainer class with model, optimizer, and loss function.
 
         Args:
             model_name (str): The name of the model to load from Hugging Face.
@@ -99,11 +109,10 @@ class SAMTrainer:
             squared_pred=True,
             reduction="mean",
         )
-        # TODO: Add NSC, but need parse in the spacing from spacing_mm.txt
-        self.metric_function = DiceMetric(include_background=True, reduction="mean")
 
     def _initialize_model(self, model_name: str) -> SamModel:
-        """Load and initialize the SAM model, applying LoRA configuration.
+        """
+        Load and initialize the SAM model, applying LoRA configuration.
 
         Args:
             model_name (str): The name of the model to load from Hugging Face.
@@ -143,7 +152,8 @@ class SAMTrainer:
         return model
 
     def _get_optimizer(self, learning_rate: float) -> AdamW:
-        """Configure the optimizer with AdamW.
+        """
+        Configure the optimizer with AdamW.
 
         Args:
             learning_rate (float): The learning rate for the optimizer.
@@ -151,17 +161,37 @@ class SAMTrainer:
         Returns:
             AdamW: The configured optimizer with specific betas and weight decay.
         """
-        return AdamW(
+        optimizer = AdamW(
             self.model.mask_decoder.parameters(),
             lr=learning_rate,
             betas=(0.9, 0.999),
             weight_decay=0.1,
         )
+        self.scheduler = StepLR(optimizer, step_size=5, gamma=0.5)
+        return optimizer
+
+    def _resize_ground_truth(
+        self, ground_truth: torch.Tensor, target_size=(256, 256)
+    ) -> torch.Tensor:
+        """
+        Resize ground truth masks to a target size.
+
+        Args:
+            ground_truth (torch.Tensor): The ground truth mask tensor.
+            target_size (tuple): Target dimensions for resizing.
+
+        Returns:
+            torch.Tensor: Resized ground truth masks.
+        """
+        return F.interpolate(
+            ground_truth.float().unsqueeze(1), size=target_size, mode="nearest-exact"
+        ).squeeze(1)
 
     def _compute_loss(
         self, predicted_masks: torch.Tensor, ground_truth_masks: torch.Tensor
     ) -> torch.Tensor:
-        """Compute the segmentation loss.
+        """
+        Compute the segmentation loss.
 
         Args:
             predicted_masks (torch.Tensor): The predicted masks from the model.
@@ -172,22 +202,9 @@ class SAMTrainer:
         """
         return self.loss_function(predicted_masks, ground_truth_masks.unsqueeze(1))
 
-    def _compute_metric(
-        self, predicted_masks: torch.Tensor, ground_truth_masks: torch.Tensor
-    ) -> torch.Tensor:
-        """Compute the segmentation metric.
-
-        Args:
-            predicted_masks (torch.Tensor): The predicted masks from the model.
-            ground_truth_masks (torch.Tensor): The true masks from the dataset.
-
-        Returns:
-            torch.Tensor: The computed metric.
-        """
-        return self.metric_function(y_pred=predicted_masks, y=ground_truth_masks)
-
     def save_pretrained(self, base_directory: str):
-        """Save the model with a folder named by model name and timestamp.
+        """
+        Save the model with a folder named by model name and timestamp.
 
         Args:
             base_directory (str): The base directory to save the model.
@@ -197,15 +214,15 @@ class SAMTrainer:
 
         os.makedirs(save_directory, exist_ok=True)
 
-        original_device = next(self.model.parameters()).device
-        self.model.to("cpu")
-        self.model.save_pretrained(save_directory, safe_serialization=False)
-        self.model.to(original_device)
+        self.model.save_pretrained(
+            save_directory, safe_serialization=False, map_location="cpu"
+        )
 
         print(f"Model saved to {save_directory}")
 
     def train_one_epoch(self, train_dataloader: DataLoader) -> float:
-        """Train the model for one epoch.
+        """
+        Train the model for one epoch.
 
         Args:
             train_dataloader (DataLoader): The dataloader for the training set.
@@ -223,13 +240,11 @@ class SAMTrainer:
                 multimask_output=False,
             )
 
-            predicted_masks = F.interpolate(
-                outputs.pred_masks.squeeze(),
-                size=(512, 512),
-                mode="nearest-exact",
-            )
+            predicted_masks = outputs.pred_masks.squeeze(1)
 
-            ground_truth_masks = batch["ground_truth_mask"].float().to(self.device)
+            ground_truth_masks = self._resize_ground_truth(
+                batch["ground_truth_mask"].to(self.device)
+            )
 
             loss = self._compute_loss(predicted_masks, ground_truth_masks)
 
@@ -241,17 +256,18 @@ class SAMTrainer:
 
         return mean(epoch_losses)
 
-    def validate(self, val_dataloader: DataLoader) -> Tuple[float, float]:
-        """Validate the model on the validation set.
+    def validate(self, val_dataloader: DataLoader) -> float:
+        """
+        Validate the model on the validation set.
 
         Args:
             val_dataloader (DataLoader): The dataloader for the validation set.
 
         Returns:
-            Tuple[float, float]: A tuple containing the mean validation loss and the mean validation score for the epoch.
+            float: The mean validation loss for the epoch.
         """
         self.model.eval()
-        val_losses, val_scores = [], []
+        val_losses = []
 
         with torch.no_grad():
             for batch in tqdm(val_dataloader):
@@ -261,29 +277,22 @@ class SAMTrainer:
                     multimask_output=False,
                 )
 
-                predicted_masks = F.interpolate(
-                    outputs.pred_masks.squeeze(),
-                    size=(512, 512),
-                    mode="nearest-exact",
+                predicted_masks = outputs.pred_masks.squeeze(1)
+
+                ground_truth_masks = self._resize_ground_truth(
+                    batch["ground_truth_mask"].to(self.device)
                 )
 
-                ground_truth_masks = batch["ground_truth_mask"].float().to(self.device)
-
                 loss = self._compute_loss(predicted_masks, ground_truth_masks)
-                score = self._compute_metric(predicted_masks, ground_truth_masks)
-
                 val_losses.append(loss.item())
-                val_scores.append(score.item())
 
-        mean_loss = mean(val_losses)
-        mean_score = mean(val_scores)
-
-        return mean_loss, mean_score
+        return mean(val_losses)
 
     def k_fold_cross_validation(
         self, dataloader: DataLoader, k_folds: int = 5, num_epochs: int = 10
     ):
-        """Perform K-Fold Cross-Validation on the dataset.
+        """
+        Perform K-Fold Cross-Validation on the dataset.
 
         Args:
             dataloader (DataLoader): The dataloader containing the dataset.
@@ -294,11 +303,7 @@ class SAMTrainer:
 
         kfold = KFold(n_splits=k_folds, shuffle=True)
 
-        fold_training_losses, fold_validation_losses, fold_validation_scores = (
-            [],
-            [],
-            [],
-        )
+        fold_training_losses, fold_validation_losses = [], []
 
         early_stopping = EarlyStopping(patience=3)
 
@@ -314,68 +319,52 @@ class SAMTrainer:
 
             val_loader = DataLoader(val_subset, batch_size=dataloader.batch_size)
 
-            training_losses, validation_losses, validation_scores = [], [], []
+            training_losses, validation_losses = [], []
 
             for epoch in range(num_epochs):
                 train_loss = self.train_one_epoch(train_loader)
-                val_loss, val_score = self.validate(val_loader)
+                val_loss = self.validate(val_loader)
 
                 training_losses.append(train_loss)
                 validation_losses.append(val_loss)
-                validation_scores.append(val_score)
 
                 print(
-                    f"For Epoch {epoch + 1}/{num_epochs} | Train DiceCE Loss: {train_loss:.4f} | Val DiceCE Loss: {val_loss:.4f} | Val DSC Score: {val_score:.4f}"
+                    f"For Epoch {epoch + 1}/{num_epochs} | Train DiceCE Loss: {train_loss:.4f} | Val DiceCE Loss: {val_loss:.4f}"
                 )
 
-                early_stopping(val_loss)
+                early_stopping(val_loss, self.model)
                 if early_stopping.early_stop:
                     print("Early stopping")
                     break
 
             fold_training_losses.append(training_losses)
             fold_validation_losses.append(validation_losses)
-            fold_validation_scores.append(validation_scores)
 
-            self._update_plot(
-                fold + 1, training_losses, validation_losses, fold_validation_scores
-            )
+            self._update_plot(fold + 1, training_losses, validation_losses)
 
     def _update_plot(
         self,
         fold: int,
         training_losses: List[float],
         validation_losses: List[float],
-        validation_scores: List[float],
     ):
-        """Update the loss and score plot for each fold.
+        """
+        Update the loss plot for each fold.
 
         Args:
             fold (int): The current fold number.
             training_losses (List[float]): List of training losses for each epoch.
             validation_losses (List[float]): List of validation losses for each epoch.
-            validation_scores (List[float]): List of validation scores for each epoch.
         """
         plt.figure(fold)
 
         plt.plot(training_losses, label="Training Loss", color="blue")
         plt.plot(validation_losses, label="Validation Loss", color="orange")
 
-        # Plot validation score on a secondary y-axis
-        ax1 = plt.gca()  # Get the current axis for losses
-        ax2 = ax1.twinx()  # Create a secondary axis for the score
-        ax2.plot(
-            validation_scores, label="Validation Score", color="green", linestyle="--"
-        )
-
-        ax1.set_xlabel("Epoch")
-        ax1.set_ylabel("Loss")
-        ax2.set_ylabel("Score")
-        plt.title(f"Training and Validation Loss and Score for Fold {fold}")
-
-        lines, labels = ax1.get_legend_handles_labels()
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines + lines2, labels + labels2, loc="upper right")
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.title(f"Training and Validation Loss for Fold {fold}")
+        plt.legend(loc="upper right")
 
         plt.show(block=False)
         plt.pause(0.1)
