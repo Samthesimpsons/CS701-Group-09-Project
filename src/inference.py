@@ -8,7 +8,7 @@ import cv2
 import torch
 import numpy as np
 
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from typing import Generator, List, Dict
 
 
@@ -69,7 +69,9 @@ def run_SAM_inference_and_save_masks(
         if current_batch:
             yield current_batch
 
-    for batch in tqdm(batch_generator(test_dataset, batch_size)):
+    for batch in tqdm(
+        batch_generator(test_dataset, batch_size), desc="Processing Batches"
+    ):
         pixel_values = torch.stack([sample["pixel_values"] for sample in batch]).to(
             device
         )
@@ -109,6 +111,7 @@ def run_SAM_inference_and_save_masks(
                 )
             else:
                 masks_by_path[mask_output_path] = binary_mask
+        del pixel_values, input_boxes, outputs, inputs
 
     for mask_output_path, mask in masks_by_path.items():
         output_directory = os.path.dirname(mask_output_path)
@@ -117,3 +120,5 @@ def run_SAM_inference_and_save_masks(
             os.makedirs(output_directory)
 
         cv2.imwrite(mask_output_path, mask)
+
+    torch.cuda.empty_cache()

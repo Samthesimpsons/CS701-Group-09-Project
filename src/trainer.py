@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 import pandas as pd
 
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from datetime import datetime
 from transformers import SamModel
 from monai.losses import DiceCELoss
@@ -227,7 +227,9 @@ class SAMTrainer:
         self.model.train()
         epoch_losses = []
 
-        for batch in tqdm(train_dataloader):
+        for batch in tqdm(
+            train_dataloader, desc="Training Batches", total=len(train_dataloader)
+        ):
             outputs = self.model(
                 pixel_values=batch["pixel_values"].to(self.device),
                 input_boxes=batch["input_boxes"].to(self.device),
@@ -248,6 +250,10 @@ class SAMTrainer:
 
             epoch_losses.append(loss.item())
 
+            # Clear batch variables to free memory
+            del outputs, predicted_masks, ground_truth_masks, loss
+            torch.cuda.empty_cache()
+
         return mean(epoch_losses)
 
     def validate(self, val_dataloader: DataLoader) -> float:
@@ -264,7 +270,9 @@ class SAMTrainer:
         val_losses = []
 
         with torch.no_grad():
-            for batch in tqdm(val_dataloader):
+            for batch in tqdm(
+                val_dataloader, desc="Validation Batches", total=len(val_dataloader)
+            ):
                 outputs = self.model(
                     pixel_values=batch["pixel_values"].to(self.device),
                     input_boxes=batch["input_boxes"].to(self.device),
@@ -279,6 +287,10 @@ class SAMTrainer:
 
                 loss = self._compute_loss(predicted_masks, ground_truth_masks)
                 val_losses.append(loss.item())
+
+                # Clear batch variables to free memory
+                del outputs, predicted_masks, ground_truth_masks, loss
+                torch.cuda.empty_cache()
 
         return mean(val_losses)
 
@@ -332,6 +344,8 @@ class SAMTrainer:
                 if early_stopping.early_stop:
                     print("Early stopping")
                     break
+            del train_loader, val_loader
+            torch.cuda.empty_cache()
 
         losses_df = pd.DataFrame(losses)
         return losses_df
