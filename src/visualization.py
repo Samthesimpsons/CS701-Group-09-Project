@@ -124,7 +124,6 @@ def visualize_segmentation_from_numpy_arrays(
     image_array: np.ndarray,
     mask_array: np.ndarray,
     bounding_boxes: Optional[List[List[int]]] = None,
-    from_inference: Optional[bool] = False,
 ) -> None:
     """
     Visualizes a CT scan image with its segmentation mask and optional bounding boxes.
@@ -210,40 +209,24 @@ def visualize_segmentation_from_numpy_arrays(
                 thickness=2,
             )
 
-    if not from_inference:
-        print("Labels in segmentation mask and corresponding organs:")
-        for label in unique_labels:
-            label_name = label_mapping.get(label, "Unknown Label")
-            print(f"Label {label}: {label_name}")
+    print("Labels in segmentation mask and corresponding organs:")
+    for label in unique_labels:
+        label_name = label_mapping.get(label, "Unknown Label")
+        print(f"Label {label}: {label_name}")
 
-        plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(10, 5))
 
-        plt.subplot(1, 2, 1)
-        plt.imshow(image_array, cmap="gray")
-        plt.title("Original Image")
-        plt.axis("off")
+    plt.subplot(1, 2, 1)
+    plt.imshow(image_array, cmap="gray")
+    plt.title("Original Image")
+    plt.axis("off")
 
-        plt.subplot(1, 2, 2)
-        plt.imshow(overlay_image)
-        plt.title("Image with Mask Label")
-        plt.axis("off")
+    plt.subplot(1, 2, 2)
+    plt.imshow(overlay_image)
+    plt.title("Image with Mask Label")
+    plt.axis("off")
 
-        plt.show()
-
-    else:
-        plt.figure(figsize=(10, 5))
-
-        plt.subplot(1, 2, 1)
-        plt.imshow(image_array, cmap="gray")
-        plt.title("Original Image")
-        plt.axis("off")
-
-        plt.subplot(1, 2, 2)
-        plt.imshow(overlay_image)
-        plt.title("Inference Segmentation Mask")
-        plt.axis("off")
-
-        plt.show()
+    plt.show()
 
 
 def count_organs_and_area_fractions(mask_file_path: str) -> Dict[str, Any]:

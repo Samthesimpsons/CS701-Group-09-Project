@@ -206,7 +206,6 @@ class SAMTrainer:
             self.optimizer.step()
 
             epoch_losses.append(loss.item())
-            print(f"Batch Train Loss: {loss.item():.4f}")
 
             del outputs, predicted_masks, ground_truth_masks, loss
             torch.cuda.empty_cache()
@@ -244,8 +243,6 @@ class SAMTrainer:
 
                 loss = self._compute_loss(predicted_masks, ground_truth_masks)
                 val_losses.append(loss.item())
-
-                print(f"Batch Val Loss: {loss.item():.4f}")
 
                 del outputs, predicted_masks, ground_truth_masks, loss
                 torch.cuda.empty_cache()
