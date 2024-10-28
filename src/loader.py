@@ -16,7 +16,6 @@ from transformers import SamProcessor
 from .preprocessing import (
     adjust_contrast_brightness,
     add_gaussian_noise,
-    normalize_to_unit_range,
     get_bounding_boxes,
 )
 from .visualization import parse_spacing_file
@@ -214,7 +213,7 @@ class SAMSegmentationDataset(Dataset):
             processed_mask = np.where(mask > 0, 1, 0)
             processed_image = adjust_contrast_brightness(image)
             processed_image = add_gaussian_noise(processed_image)
-            processed_image = normalize_to_unit_range(processed_image)
+            # processed_image = normalize_to_unit_range(processed_image)
 
             inputs = self.processor(
                 cv2.cvtColor(processed_image, cv2.COLOR_GRAY2RGB),
@@ -240,10 +239,10 @@ class SAMSegmentationDataset(Dataset):
             image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
 
             # Preprocessing Stage
-            processed_image = normalize_to_unit_range(image)
+            # image = normalize_to_unit_range(image)
 
             inputs = self.processor(
-                cv2.cvtColor(processed_image, cv2.COLOR_GRAY2RGB),
+                cv2.cvtColor(image, cv2.COLOR_GRAY2RGB),
                 input_boxes=[[bounding_box]],
                 return_tensors="pt",
             )

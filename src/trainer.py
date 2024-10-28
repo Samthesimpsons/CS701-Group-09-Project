@@ -3,9 +3,6 @@ This module defines a `SAMTrainer` class to train a SAM (Segment Anything Model)
 segmentation model using K-Fold Cross-Validation. The model is initialized from 
 the "facebook/sam-vit-base" checkpoint, and the training process utilizes 
 the DiceCELoss function for segmentation.
-
-Additionally, an `EarlyStopping` class is implemented to halt training if 
-the validation loss does not improve after a set number of epochs (patience).
 """
 
 import os
@@ -18,52 +15,10 @@ from datetime import datetime
 from transformers import SamModel
 from monai.losses import DiceCELoss
 from torch.optim import AdamW
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, random_split
 from torch.optim.lr_scheduler import StepLR
-from sklearn.model_selection import KFold
 from peft import LoraConfig, get_peft_model
 from statistics import mean
-
-
-class EarlyStopping:
-    def __init__(self, patience: int = 5, delta: float = 0, restore_best: bool = True):
-        """
-        Initialize the EarlyStopping mechanism.
-
-        Args:
-            patience (int): Number of epochs to wait before stopping if no improvement.
-            delta (float): Minimum change to qualify as an improvement.
-            restore_best (bool): Whether to restore the model to its best state.
-        """
-        self.patience = patience
-        self.delta = delta
-        self.best_loss = None
-        self.counter = 0
-        self.early_stop = False
-        self.restore_best = restore_best
-        self.best_model_state = None
-
-    def __call__(self, val_loss: float, model: torch.nn.Module):
-        """
-        Check whether to stop training based on validation loss.
-
-        Args:
-            val_loss (float): The current validation loss.
-            model (torch.nn.Module): The model being trained.
-        """
-        if self.best_loss is None or val_loss < self.best_loss - self.delta:
-            self.best_loss = val_loss
-            self.counter = 0
-            if self.restore_best:
-                self.best_model_state = {
-                    k: v.clone() for k, v in model.state_dict().items()
-                }
-        else:
-            self.counter += 1
-            if self.counter >= self.patience:
-                self.early_stop = True
-                if self.restore_best:
-                    model.load_state_dict(self.best_model_state)
 
 
 class SAMTrainer:
@@ -78,6 +33,7 @@ class SAMTrainer:
         lora_alpha: int = 8,
         lora_dropout: float = 0,
         quantize_8bits: bool = False,
+        val_split: float = 0.2,
     ):
         """
         Initialize the SAMTrainer class with model, optimizer, and loss function.
@@ -96,6 +52,7 @@ class SAMTrainer:
         self.lora_alpha = lora_alpha
         self.lora_dropout = lora_dropout
         self.quantize_8bits = quantize_8bits
+        self.val_split = val_split
         self.model = self._initialize_model(model_name)
         self.optimizer = self._get_optimizer(learning_rate)
         self.loss_function = DiceCELoss(
@@ -128,7 +85,7 @@ class SAMTrainer:
             model = SamModel.from_pretrained(model_name)
 
         for name, param in model.named_parameters():
-            if name.startswith("vision_encoder"):
+            if name.startswith("vision_encoder") or name.startswith("prompt_encoder"):
                 param.requires_grad_(False)
 
         model.vision_encoder = get_peft_model(model.vision_encoder, config)
@@ -249,8 +206,8 @@ class SAMTrainer:
             self.optimizer.step()
 
             epoch_losses.append(loss.item())
+            print(f"Batch Train Loss: {loss.item():.4f}")
 
-            # Clear batch variables to free memory
             del outputs, predicted_masks, ground_truth_masks, loss
             torch.cuda.empty_cache()
 
@@ -288,64 +245,64 @@ class SAMTrainer:
                 loss = self._compute_loss(predicted_masks, ground_truth_masks)
                 val_losses.append(loss.item())
 
-                # Clear batch variables to free memory
+                print(f"Batch Val Loss: {loss.item():.4f}")
+
                 del outputs, predicted_masks, ground_truth_masks, loss
                 torch.cuda.empty_cache()
 
         return mean(val_losses)
 
-    def k_fold_cross_validation(
-        self, dataloader: DataLoader, k_folds: int = 5, num_epochs: int = 10
-    ) -> pd.DataFrame:
+    def split_dataset(self, dataloader: DataLoader):
         """
-        Perform K-Fold Cross-Validation on the dataset.
+        Split the dataset into training and validation subsets.
 
         Args:
-            dataloader (DataLoader): The dataloader containing the dataset.
-            k_folds (int): Number of folds for cross-validation.
-            num_epochs (int): Number of epochs to train for each fold.
+            dataloader (DataLoader): The dataloader containing the full dataset.
 
         Returns:
-            pd.DataFrame: A DataFrame containing fold, epoch, train loss, and validation loss for each fold.
+            tuple: Train and validation DataLoaders.
         """
         dataset = dataloader.dataset
-        kfold = KFold(n_splits=k_folds, shuffle=True)
-        early_stopping = EarlyStopping(patience=3)
+        val_size = int(len(dataset) * self.val_split)
+        train_size = len(dataset) - val_size
+        train_subset, val_subset = random_split(dataset, [train_size, val_size])
 
+        train_loader = DataLoader(
+            train_subset, batch_size=dataloader.batch_size, shuffle=True
+        )
+        val_loader = DataLoader(val_subset, batch_size=dataloader.batch_size)
+
+        return train_loader, val_loader
+
+    def train(self, dataloader: DataLoader, num_epochs: int = 10) -> pd.DataFrame:
+        """
+        Train the model over multiple epochs with validation.
+
+        Args:
+            dataloader (DataLoader): The dataloader containing the full dataset.
+            num_epochs (int): Number of epochs to train.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing epoch, train loss, and validation loss.
+        """
+        train_dataloader, val_dataloader = self.split_dataset(dataloader)
         losses = []
 
-        for fold, (train_idx, val_idx) in enumerate(
-            tqdm(kfold.split(dataset), desc="Folds", total=k_folds)
-        ):
-            train_subset = Subset(dataset, train_idx)
-            val_subset = Subset(dataset, val_idx)
+        for epoch in tqdm(range(num_epochs), desc="Epochs", total=num_epochs):
+            train_loss = self.train_one_epoch(train_dataloader)
+            val_loss = self.validate(val_dataloader)
 
-            train_loader = DataLoader(
-                train_subset, batch_size=dataloader.batch_size, shuffle=True
+            losses.append(
+                {
+                    "Epoch": epoch + 1,
+                    "Train_DiceCE_Loss": train_loss,
+                    "Val_DiceCE_Loss": val_loss,
+                }
             )
-            val_loader = DataLoader(val_subset, batch_size=dataloader.batch_size)
 
-            for epoch in tqdm(
-                range(num_epochs), desc=f"Epochs for Fold {fold+1}", leave=True
-            ):
-                train_loss = self.train_one_epoch(train_loader)
-                val_loss = self.validate(val_loader)
-
-                losses.append(
-                    {
-                        "Fold": fold + 1,
-                        "Epoch": epoch + 1,
-                        "Train_DiceCE_Loss": train_loss,
-                        "Val_DiceCE_Loss": val_loss,
-                    }
-                )
-
-                early_stopping(val_loss, self.model)
-                if early_stopping.early_stop:
-                    print("Early stopping")
-                    break
-            del train_loader, val_loader
-            torch.cuda.empty_cache()
+            print(
+                f"Epoch {epoch + 1} - Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}"
+            )
 
         losses_df = pd.DataFrame(losses)
         return losses_df
